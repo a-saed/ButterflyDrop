@@ -1,0 +1,675 @@
+Project Name
+
+Butterfly Drop
+
+Tagline
+
+Let your files fly.
+
+🎯 Product Goal
+
+Build Butterfly Drop, a cross-platform PWA web app that enables fast, private, peer-to-peer file and folder sharing using WebRTC DataChannels.
+
+The app must allow users to share files directly between devices without uploading files to any server, similar to Snapdrop / ToffeeShare, but with enhanced UX, folder support, and delightful animations.
+
+🧠 Core Principles
+
+No user accounts
+
+No cloud storage
+
+No file persistence on servers
+
+Session-based, ephemeral sharing
+
+End-to-end encrypted (WebRTC default)
+
+Extremely simple UX
+
+Fun, lightweight, friendly experience
+
+Works on desktop and mobile browsers
+
+Installable PWA
+
+🛠 Tech Stack
+
+Frontend Framework
+
+React 18+ with TypeScript
+
+Vite as build tool and dev server
+
+React Router (if needed for routing, but prefer single-page for MVP)
+
+State Management
+
+React Context API for global state (session, connection status)
+
+useState/useReducer for component-level state
+
+Avoid Redux or other heavy state management libraries for MVP
+
+Styling
+
+shadcn/ui components for UI primitives
+
+Tailwind CSS (via shadcn/ui)
+
+CSS modules or styled-components only if absolutely necessary
+
+Custom animations using CSS transitions/transforms or Framer Motion (lightweight)
+
+TypeScript
+
+Strict mode enabled
+
+No `any` types unless absolutely necessary
+
+Define proper interfaces for all data structures
+
+Use type guards for runtime validation
+
+WebRTC Libraries
+
+Native WebRTC APIs (RTCPeerConnection, RTCDataChannel)
+
+Consider simple wrapper utilities for connection management
+
+Avoid heavy WebRTC libraries unless needed
+
+PWA
+
+Vite PWA plugin (vite-plugin-pwa)
+
+Service worker for offline shell
+
+Web App Manifest
+
+📁 Project Structure
+
+```
+butterfly-drop/
+├── src/
+│   ├── components/          # React components
+│   │   ├── ui/              # shadcn/ui components
+│   │   ├── transfer/        # Transfer-related components
+│   │   ├── connection/      # Connection status components
+│   │   └── layout/          # Layout components
+│   ├── hooks/               # Custom React hooks
+│   │   ├── useWebRTC.ts     # WebRTC connection logic
+│   │   ├── useFileTransfer.ts
+│   │   └── useSession.ts
+│   ├── lib/                 # Utilities and helpers
+│   │   ├── webrtc/          # WebRTC utilities
+│   │   ├── fileUtils.ts     # File handling utilities
+│   │   ├── sessionUtils.ts  # Session ID generation
+│   │   └── qrCode.ts        # QR code generation
+│   ├── types/               # TypeScript type definitions
+│   │   ├── webrtc.ts
+│   │   ├── transfer.ts
+│   │   └── session.ts
+│   ├── contexts/            # React contexts
+│   │   ├── SessionContext.tsx
+│   │   └── ConnectionContext.tsx
+│   ├── services/            # Service layer
+│   │   ├── signaling.ts     # WebSocket signaling client
+│   │   └── storage.ts        # IndexedDB/localStorage utilities
+│   ├── styles/              # Global styles
+│   │   └── globals.css      # Tailwind imports
+│   ├── App.tsx              # Main app component
+│   ├── main.tsx             # Entry point
+│   └── vite-env.d.ts        # Vite type definitions
+├── public/                  # Static assets
+│   ├── manifest.json        # PWA manifest
+│   └── icons/               # PWA icons
+├── .cursorrules             # This file
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+├── tailwind.config.js
+└── components.json          # shadcn/ui config
+```
+
+🏗 Architecture Overview
+
+Frontend
+
+React + Vite + TypeScript
+
+Progressive Web App (service worker, offline shell)
+
+WebRTC:
+
+RTCPeerConnection
+
+RTCDataChannel
+
+Chunked streaming for large files
+
+Folder transfer support
+
+Animations for feedback (prefer lightweight libs like Framer Motion or CSS animations)
+
+Backend (Minimal)
+
+WebSocket signaling server only
+
+Used exclusively for:
+
+Session creation
+
+SDP exchange
+
+ICE candidate exchange
+
+Temporary in-memory sessions
+
+No file data ever touches the server
+
+STUN servers for NAT traversal
+
+TURN server optional as fallback
+
+💻 Code Style & Best Practices
+
+TypeScript
+
+Always use strict mode
+
+Define interfaces for all data structures (FileMetadata, TransferProgress, Session, etc.)
+
+Use type guards for runtime validation
+
+Prefer type over interface for unions/intersections
+
+Use enums sparingly, prefer const objects with `as const`
+
+React
+
+Use functional components only
+
+Use custom hooks to encapsulate WebRTC logic
+
+Keep components small and focused (single responsibility)
+
+Use React.memo for expensive components if needed
+
+Prefer composition over prop drilling
+
+Use Context API for truly global state only
+
+File Naming
+
+Components: PascalCase (e.g., `TransferProgress.tsx`)
+
+Hooks: camelCase with `use` prefix (e.g., `useWebRTC.ts`)
+
+Utilities: camelCase (e.g., `fileUtils.ts`)
+
+Types: camelCase (e.g., `transfer.ts`)
+
+Imports
+
+Group imports: external libraries, then internal modules
+
+Use absolute imports via path aliases (configure in tsconfig.json and vite.config.ts)
+
+Example:
+```typescript
+import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { useWebRTC } from '@/hooks/useWebRTC'
+```
+
+Error Handling
+
+Use Error boundaries for React components
+
+Provide user-friendly error messages
+
+Log errors to console in development, silent in production
+
+Handle WebRTC errors gracefully with retry logic where appropriate
+
+🔗 Connection Model (MVP)
+
+Link-based sessions
+
+Sender opens Butterfly Drop
+
+App creates a random sessionId (use crypto.randomUUID() or nanoid)
+
+App generates a shareable link + QR code
+
+Receiver opens link
+
+Signaling server exchanges SDP + ICE
+
+WebRTC P2P connection is established
+
+Files/folders stream directly sender → receiver
+
+Session auto-expires on completion or disconnect
+
+Session ID Format
+
+Use URL-safe random strings (12-16 characters)
+
+Example: `abc123xyz789`
+
+Store in URL hash or query parameter
+
+QR Code
+
+Use a lightweight library like `qrcode.react` or `react-qr-code`
+
+Include session ID in URL
+
+Update QR code when session changes
+
+📁 File & Folder Transfer
+
+Files
+
+Send metadata first:
+
+name
+
+size
+
+MIME type
+
+lastModified (optional)
+
+Stream via WebRTC DataChannel
+
+Chunk size ≈ 256 KB (262144 bytes)
+
+Use ArrayBuffer for binary data
+
+Show:
+
+progress (percentage)
+
+speed (MB/s or KB/s)
+
+ETA (calculated from speed and remaining bytes)
+
+File size (human-readable format)
+
+Folders
+
+Support directory selection (webkitdirectory attribute on input)
+
+Serialize folder tree structure as JSON
+
+Send folder metadata before file transfer
+
+Structure:
+```typescript
+{
+  name: string
+  path: string
+  files: FileMetadata[]
+  folders: FolderMetadata[]
+}
+```
+
+Recreate directory structure on receiver side using File System Access API or download with proper names
+
+Stream files sequentially (simpler) or in parallel (faster but more complex)
+
+For MVP: sequential is fine
+
+🔄 Transfer Flow
+
+User selects files/folders
+
+Create sessionId
+
+Wait for peer to join (show waiting state)
+
+Establish WebRTC connection
+
+Send metadata (file list with sizes)
+
+Stream chunks with sequence numbers
+
+Receiver writes chunks progressively
+
+Show success animation
+
+Destroy session and cleanup
+
+WebRTC Implementation Details
+
+Connection Setup
+
+Use RTCPeerConnection with proper configuration:
+```typescript
+const config = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    // Add TURN server if needed
+  ]
+}
+```
+
+Create data channel with:
+- ordered: true (for file transfer)
+- maxRetransmits: 0 (no retransmission for file chunks)
+
+Chunk Protocol
+
+Each chunk should include:
+- Sequence number
+- File ID
+- Chunk data (ArrayBuffer)
+- Is last chunk flag
+
+Use structured clone or JSON for metadata, ArrayBuffer for file data
+
+Error Recovery
+
+Handle connection drops gracefully
+
+Show clear error messages
+
+Allow retry for failed transfers
+
+🎨 UI / UX Requirements
+
+Single-screen UI
+
+Drag & drop area (use react-dropzone or native HTML5 drag-drop)
+
+Click to select files/folders
+
+Display connected peer (device name + icon)
+
+Animated transfer progress
+
+Live speed indicator
+
+Completion animation (butterfly-inspired)
+
+Friendly empty states
+
+Mobile-first responsive design
+
+shadcn/ui Usage
+
+Install shadcn/ui components as needed
+
+Use components from `@/components/ui/`
+
+Customize theme via tailwind.config.js
+
+Prefer shadcn components over custom implementations
+
+Common components to use:
+
+Button, Card, Progress, Dialog, Toast, Badge, Avatar
+
+Styling Guidelines
+
+Use Tailwind utility classes
+
+Create reusable component variants using cva (class-variance-authority)
+
+Keep animations subtle and performant
+
+Use CSS custom properties for theming
+
+Mobile Considerations
+
+Touch-friendly button sizes (min 44x44px)
+
+Responsive typography
+
+Test on real mobile devices
+
+Handle viewport meta tag correctly
+
+✨ Delight & Branding
+
+Butterfly-inspired motion (flutter, wings, lightness)
+
+File transfer feels like "flying"
+
+Progress morphs into success indicator
+
+Subtle animations over heavy effects
+
+Clean, modern, playful aesthetic
+
+Animation Guidelines
+
+Use CSS transitions for simple animations
+
+Use Framer Motion for complex animations (if needed)
+
+Prefer transform and opacity for performance
+
+Avoid animating layout properties (width, height, margin)
+
+Keep animation duration short (200-500ms)
+
+🔐 Security & Privacy
+
+WebRTC DTLS encryption (default)
+
+Random, short-lived session IDs
+
+No logging of file content
+
+No analytics on transferred data
+
+No file metadata stored server-side
+
+Validate all user inputs
+
+Sanitize file names before transfer
+
+⚠ Constraints & Considerations
+
+Both peers must remain online during transfer
+
+No resumable transfers in MVP
+
+Safari / iOS memory limitations must be handled gracefully
+
+Some networks may require TURN fallback
+
+Show clear errors when P2P is blocked
+
+Browser Compatibility
+
+Test on Chrome, Firefox, Safari, Edge
+
+Handle Safari-specific WebRTC quirks
+
+Provide fallback for unsupported browsers
+
+Memory Management
+
+Release file handles after transfer
+
+Use streaming instead of loading entire files into memory
+
+Handle large files (>100MB) with care
+
+🚀 MVP Scope
+
+Link-based sharing
+
+Single & multiple files
+
+Folder transfer
+
+QR code support
+
+Transfer progress UI
+
+PWA install support
+
+❌ Out of Scope (for Now)
+
+User authentication
+
+Cloud backups
+
+Transfer history
+
+Account-based discovery
+
+Persistent sessions
+
+🧩 Implementation Expectations
+
+Clean, modular, readable code
+
+Separate WebRTC logic from UI components
+
+Minimal backend logic
+
+Avoid over-engineering
+
+Optimize for fast iteration and clarity
+
+Testing Strategy (Future)
+
+Unit tests for utilities and hooks
+
+Integration tests for WebRTC connection flow
+
+E2E tests for critical user flows
+
+Use Vitest for unit tests (Vite-native)
+
+Performance Optimization
+
+Code splitting with React.lazy for non-critical components
+
+Lazy load QR code library
+
+Optimize bundle size
+
+Use Vite's built-in optimizations
+
+Monitor bundle size with vite-bundle-visualizer
+
+PWA Configuration
+
+Configure vite-plugin-pwa with:
+
+Offline fallback page
+
+Cache strategies for assets
+
+Service worker registration
+
+App icons (multiple sizes)
+
+Manifest with proper metadata
+
+🎯 Expected Outcome
+
+A polished MVP of Butterfly Drop that:
+
+Feels instant and magical
+
+Requires zero onboarding
+
+Transfers files privately and directly
+
+Works reliably across modern browsers
+
+📝 Development Workflow
+
+Vite Dev Server
+
+Use `npm run dev` for development
+
+Hot module replacement enabled
+
+Fast refresh for React components
+
+Build
+
+Use `npm run build` for production build
+
+Optimize for production (minify, tree-shake)
+
+Test production build locally with `npm run preview`
+
+Linting & Formatting
+
+Use ESLint with React and TypeScript plugins
+
+Use Prettier for code formatting
+
+Configure both in project
+
+🔧 Configuration Files
+
+vite.config.ts
+
+Configure path aliases (@/ for src/)
+
+Set up PWA plugin
+
+Configure build options
+
+tsconfig.json
+
+Enable strict mode
+
+Configure path aliases
+
+Set proper module resolution
+
+tailwind.config.js
+
+Configure content paths
+
+Set up theme customization
+
+Add shadcn/ui theme configuration
+
+components.json
+
+shadcn/ui configuration
+
+Set component directory
+
+Configure style (default, new-york, etc.)
+
+🎨 Design Tokens
+
+Colors
+
+Primary: Butterfly-inspired colors (warm oranges, soft pinks, or vibrant blues)
+
+Use semantic color names (primary, secondary, success, error)
+
+Typography
+
+Use system fonts for performance
+
+Consider Inter or system-ui stack
+
+Responsive font sizes
+
+Spacing
+
+Use Tailwind's spacing scale
+
+Consistent spacing throughout
+
+Breakpoints
+
+Mobile-first approach
+
+sm: 640px, md: 768px, lg: 1024px, xl: 1280px

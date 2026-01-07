@@ -1,0 +1,22 @@
+/* Canvas ambient background styles */
+canvas[aria-hidden="true"] {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 1;
+  mix-blend-mode: normal;
+}
+
+/* Theme-specific adjustments */
+.dark canvas[aria-hidden="true"] {
+  mix-blend-mode: screen;
+  opacity: 1;
+}
+
+/* Light mode - ensure visibility */
+:not(.dark) canvas[aria-hidden="true"] {
+  mix-blend-mode: normal;
+  opacity: 1;
+}
+

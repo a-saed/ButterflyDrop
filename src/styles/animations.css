@@ -1,0 +1,138 @@
+/* Butterfly-inspired animations */
+
+@keyframes flutter {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-8px) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-4px) rotate(0deg);
+  }
+  75% {
+    transform: translateY(-8px) rotate(2deg);
+  }
+}
+
+@keyframes fly {
+  0% {
+    transform: translateX(0) translateY(0) scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: translateX(50px) translateY(-20px) scale(0.9);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateX(100px) translateY(-40px) scale(0.7);
+    opacity: 0;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(var(--primary-rgb, 59, 130, 246), 0.3);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(var(--primary-rgb, 59, 130, 246), 0.6);
+  }
+}
+
+@keyframes morph-success {
+  0% {
+    transform: scale(1);
+    border-radius: 0.5rem;
+  }
+  50% {
+    transform: scale(1.05);
+    border-radius: 1rem;
+  }
+  100% {
+    transform: scale(1);
+    border-radius: 50%;
+  }
+}
+
+@keyframes morphSuccess {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+/* Utility classes */
+.animate-flutter {
+  animation: flutter 2s ease-in-out infinite;
+}
+
+.animate-fly {
+  animation: fly 1s ease-out forwards;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-morph-success {
+  animation: morph-success 0.5s ease-out forwards;
+}
+
+/* Smooth transitions */
+.transition-butterfly {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hover-lift {
+  transition: transform 0.2s ease-out;
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px);
+}
+
+/* File transfer animations */
+.file-flying {
+  animation: fly 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.progress-morph {
+  transition: border-radius 0.5s ease-out, transform 0.5s ease-out;
+}
+
+.progress-morph.complete {
+  border-radius: 50%;
+  transform: scale(1.1);
+}
+
