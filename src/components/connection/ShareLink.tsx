@@ -1,7 +1,7 @@
-import { useState } from 'react'
-import { Copy, Check, Share2, QrCode } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { QRCode } from 'react-qr-code'
+import { useState } from "react";
+import { Copy, Check, Share2, QrCode } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import QRCode from "react-qr-code";
 import {
   Dialog,
   DialogContent,
@@ -9,48 +9,48 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@/components/ui/dialog'
+} from "@/components/ui/dialog";
 
 interface ShareLinkProps {
-  url: string
+  url: string;
 }
 
 export function ShareLink({ url }: ShareLinkProps) {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch (error) {
-      console.error('Failed to copy URL:', error)
+      console.error("Failed to copy URL:", error);
     }
-  }
+  };
 
   const handleShare = async () => {
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'Butterfly Drop',
-          text: 'Share files with me',
+          title: "Butterfly Drop",
+          text: "Share files with me",
           url,
-        })
+        });
       } catch (error) {
         // User cancelled or error occurred
-        console.error('Share failed:', error)
+        console.error("Share failed:", error);
       }
     } else {
-      handleCopy()
+      handleCopy();
     }
-  }
+  };
 
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 px-3 py-2 bg-muted rounded-lg border text-sm truncate">
         {url}
       </div>
-      
+
       <Button
         variant="outline"
         size="icon"
@@ -64,7 +64,7 @@ export function ShareLink({ url }: ShareLinkProps) {
         )}
       </Button>
 
-      {navigator.share && (
+      {navigator.share && typeof navigator.share === "function" && (
         <Button
           variant="outline"
           size="icon"
@@ -77,7 +77,11 @@ export function ShareLink({ url }: ShareLinkProps) {
 
       <Dialog>
         <DialogTrigger asChild>
-          <Button variant="outline" size="icon" className="shrink-0 transition-butterfly hover-lift">
+          <Button
+            variant="outline"
+            size="icon"
+            className="shrink-0 transition-butterfly hover-lift"
+          >
             <QrCode className="h-4 w-4" />
           </Button>
         </DialogTrigger>
@@ -99,6 +103,5 @@ export function ShareLink({ url }: ShareLinkProps) {
         </DialogContent>
       </Dialog>
     </div>
-  )
+  );
 }
-

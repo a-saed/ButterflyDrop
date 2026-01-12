@@ -1,25 +1,25 @@
-import { QRCodeSVG } from 'react-qr-code'
-import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Copy, Check } from 'lucide-react'
-import { useState } from 'react'
+import QRCodeSVG from "react-qr-code";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Copy, Check } from "lucide-react";
+import { useState } from "react";
 
 interface QRCodeDisplayProps {
-  url: string
+  url: string;
 }
 
 export function QRCodeDisplay({ url }: QRCodeDisplayProps) {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch (error) {
-      console.error('Failed to copy URL:', error)
+      console.error("Failed to copy URL:", error);
     }
-  }
+  };
 
   return (
     <Card className="p-6">
@@ -53,6 +53,5 @@ export function QRCodeDisplay({ url }: QRCodeDisplayProps) {
         </p>
       </div>
     </Card>
-  )
+  );
 }
-

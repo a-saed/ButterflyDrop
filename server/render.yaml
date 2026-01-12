@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: butterfly-drop-signaling
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: pnpm install && pnpm build
+    startCommand: pnpm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      - key: ALLOWED_ORIGINS
+        sync: false
+    healthCheckPath: /
+    autoDeploy: true

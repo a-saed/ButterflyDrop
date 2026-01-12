@@ -1,13 +1,13 @@
-import { useCallback, useState } from 'react'
-import { useDropzone } from 'react-dropzone'
-import { Upload, File, Folder, X } from 'lucide-react'
-import { formatFileSize } from '@/lib/fileUtils'
-import { Button } from '@/components/ui/button'
+import { useCallback, useState } from "react";
+import { useDropzone } from "react-dropzone";
+import { Upload, File, Folder, X } from "lucide-react";
+import { formatFileSize } from "@/lib/fileUtils";
+import { Button } from "@/components/ui/button";
 
 interface DropZoneProps {
-  onFilesSelected: (files: File[]) => void
-  onFolderSelected: (files: FileList) => void
-  disabled?: boolean
+  onFilesSelected: (files: File[]) => void;
+  onFolderSelected: (files: FileList) => void;
+  disabled?: boolean;
 }
 
 export function DropZone({
@@ -15,39 +15,39 @@ export function DropZone({
   onFolderSelected,
   disabled = false,
 }: DropZoneProps) {
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
       if (acceptedFiles.length > 0) {
-        setSelectedFiles(acceptedFiles)
-        onFilesSelected(acceptedFiles)
+        setSelectedFiles(acceptedFiles);
+        onFilesSelected(acceptedFiles);
       }
     },
-    [onFilesSelected]
-  )
+    [onFilesSelected],
+  );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     disabled,
     noClick: disabled,
     noKeyboard: disabled,
-  })
+  });
 
   const handleFolderSelect = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
-      const files = event.target.files
+      const files = event.target.files;
       if (files && files.length > 0) {
-        setSelectedFiles(Array.from(files))
-        onFolderSelected(files)
+        setSelectedFiles(Array.from(files));
+        onFolderSelected(files);
       }
     },
-    [onFolderSelected]
-  )
+    [onFolderSelected],
+  );
 
   const clearSelection = useCallback(() => {
-    setSelectedFiles([])
-  }, [])
+    setSelectedFiles([]);
+  }, []);
 
   return (
     <div className="w-full">
@@ -56,7 +56,8 @@ export function DropZone({
         <div className="mb-6 p-4 bg-muted/30 rounded-xl border">
           <div className="flex items-center justify-between mb-3">
             <p className="text-sm font-medium">
-              {selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} selected
+              {selectedFiles.length} file{selectedFiles.length > 1 ? "s" : ""}{" "}
+              selected
             </p>
             <Button
               variant="ghost"
@@ -89,31 +90,38 @@ export function DropZone({
       {/* Main Drop Zone */}
       <div
         {...getRootProps()}
-          className={`
+        className={`
           relative w-full min-h-[400px] rounded-2xl border-2 border-dashed
           flex flex-col items-center justify-center gap-6 p-12
           transition-all duration-200 cursor-pointer
-          ${isDragActive 
-            ? 'border-primary/50 bg-primary/5' 
-            : 'border-muted-foreground/20 hover:border-muted-foreground/40 hover:bg-muted/20'
+          ${
+            isDragActive
+              ? "border-primary/50 bg-primary/5"
+              : "border-muted-foreground/20 hover:border-muted-foreground/40 hover:bg-muted/20"
           }
-          ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
+          ${disabled ? "opacity-50 cursor-not-allowed" : ""}
         `}
       >
         <input {...getInputProps()} />
-        
+
         <div className="flex flex-col items-center gap-4">
           {isDragActive ? (
             <>
               <Upload className="h-16 w-16 text-primary transition-colors" />
-              <p className="text-xl font-medium text-primary">Drop files here</p>
+              <p className="text-xl font-medium text-primary">
+                Drop files here
+              </p>
             </>
           ) : (
             <>
               <Upload className="h-16 w-16 text-muted-foreground transition-colors" />
               <div className="text-center">
-                <p className="text-xl font-medium mb-1">Drop files or folders</p>
-                <p className="text-sm text-muted-foreground">or click to browse</p>
+                <p className="text-xl font-medium mb-1">
+                  Drop files or folders
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  or click to browse
+                </p>
               </div>
             </>
           )}
@@ -126,8 +134,8 @@ export function DropZone({
               variant="outline"
               size="lg"
               onClick={(e) => {
-                e.stopPropagation()
-                document.getElementById('file-input')?.click()
+                e.stopPropagation();
+                document.getElementById("file-input")?.click();
               }}
               disabled={disabled}
               className="gap-2"
@@ -140,8 +148,8 @@ export function DropZone({
               variant="outline"
               size="lg"
               onClick={(e) => {
-                e.stopPropagation()
-                document.getElementById('folder-input')?.click()
+                e.stopPropagation();
+                document.getElementById("folder-input")?.click();
               }}
               disabled={disabled}
               className="gap-2"
@@ -159,9 +167,9 @@ export function DropZone({
           className="hidden"
           onChange={(e) => {
             if (e.target.files) {
-              const files = Array.from(e.target.files)
-              setSelectedFiles(files)
-              onFilesSelected(files)
+              const files = Array.from(e.target.files);
+              setSelectedFiles(files);
+              onFilesSelected(files);
             }
           }}
           disabled={disabled}
@@ -169,7 +177,7 @@ export function DropZone({
         <input
           id="folder-input"
           type="file"
-          webkitdirectory=""
+          {...({ webkitdirectory: "" } as any)}
           multiple
           className="hidden"
           onChange={handleFolderSelect}
@@ -177,6 +185,5 @@ export function DropZone({
         />
       </div>
     </div>
-  )
+  );
 }
-

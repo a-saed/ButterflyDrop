@@ -11,10 +11,14 @@ export function useSession() {
   // Check for session ID in URL on mount
   useEffect(() => {
     const sessionId = getSessionIdFromUrl()
+    console.log(`useSession: URL sessionId=${sessionId}, existing session=${sessionContext.session?.id}`)
+    
     if (sessionId && !sessionContext.session) {
+      console.log(`Joining existing session from URL: ${sessionId}`)
       sessionContext.joinSession(sessionId)
     } else if (!sessionId && !sessionContext.session) {
       // Create new session if none exists
+      console.log('No session in URL, creating new session')
       const newSession = sessionContext.createSession()
       // Update URL with session ID
       const shareableUrl = createShareableUrl(newSession.id)
