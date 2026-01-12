@@ -57,16 +57,21 @@ export function useWebRTC() {
   const deviceNameRef = useRef<string>(getDeviceName());
   const deviceTypeRef = useRef<string>(detectDeviceType());
   const hasInitializedRef = useRef(false);
+  const isJoiningRef = useRef(false);
 
   /**
    * Initialize signaling and join network
    */
   const initialize = useCallback(async () => {
-    if (!session || hasInitializedRef.current) {
+    if (!session || hasInitializedRef.current || isJoiningRef.current) {
+      console.log(
+        `⏭️ Skipping initialization (session=${!!session}, initialized=${hasInitializedRef.current}, joining=${isJoiningRef.current})`,
+      );
       return;
     }
 
     hasInitializedRef.current = true;
+    isJoiningRef.current = true;
     console.log(
       `Initializing session ${session.id} as ${deviceNameRef.current} (peer ${peerIdRef.current})`,
     );
@@ -79,25 +84,37 @@ export function useWebRTC() {
       signalingRef.current = signaling;
 
       console.log(`🔌 Connecting to signaling server: ${SIGNALING_URL}`);
+      console.log(`📍 Current location: ${window.location.href}`);
+      console.log(
+        `🌐 Environment VITE_SIGNALING_URL: ${import.meta.env.VITE_SIGNALING_URL}`,
+      );
       await signaling.connect();
-      console.log("✅ Connected to signaling server");
+      console.log("✅ Connected to signaling server successfully!");
 
-      // Store my peer ID
-      setMyPeerId(peerIdRef.current);
+      // CRITICAL: Store my peer ID FIRST before any messages
+      // This ensures filtering works correctly when peers arrive
+      const myId = peerIdRef.current;
+      console.log(`🆔 Setting my peer ID: ${myId} (${myId.slice(0, 8)}...)`);
+      setMyPeerId(myId);
+
+      // Wait a tiny bit to ensure state update propagates
+      await new Promise((resolve) => setTimeout(resolve, 10));
 
       // Join the P2P network (all peers are equal)
       console.log(
-        `Joining P2P network ${session.id} as ${deviceNameRef.current} (${peerIdRef.current})`,
+        `Joining P2P network ${session.id} as ${deviceNameRef.current} (${myId})`,
       );
 
       // Use session-join for everyone (no sender/receiver distinction)
       signaling.send({
         type: "session-join",
         sessionId: session.id,
-        peerId: peerIdRef.current,
+        peerId: myId,
         peerName: deviceNameRef.current,
         deviceType: deviceTypeRef.current,
       });
+
+      isJoiningRef.current = false;
 
       // Handle signaling messages
       signaling.on("message", async (data: unknown) => {
@@ -106,25 +123,69 @@ export function useWebRTC() {
 
         if (message.type === "session-join" && message.peers) {
           // Successfully joined P2P network
+          const myId = peerIdRef.current;
           console.log("✅ Joined P2P network, received peers:", message.peers);
-          // Deduplicate peers (server should handle this, but safety check)
-          const uniquePeers = message.peers.filter(
+          console.log(`👤 My peer ID: ${myId} (${myId.slice(0, 8)}...)`);
+          console.log(`👥 Total peers from server: ${message.peers.length}`);
+
+          // CRITICAL: Filter out self BEFORE setting peers
+          const otherPeers = message.peers.filter((peer) => {
+            const isSelf = peer.id === myId;
+            if (isSelf) {
+              console.log(
+                `🚫 Filtering out SELF: ${peer.name} (${peer.id.slice(0, 8)}...)`,
+              );
+            }
+            return !isSelf;
+          });
+
+          // Deduplicate remaining peers
+          const uniquePeers = otherPeers.filter(
             (peer, index, self) =>
               index === self.findIndex((p) => p.id === peer.id),
           );
-          console.log(`📡 Setting ${uniquePeers.length} unique peers`);
+
+          console.log(
+            `📡 Setting ${uniquePeers.length} OTHER peers (filtered self, deduplicated)`,
+          );
+          console.log(
+            `📋 Other peer details:`,
+            uniquePeers.map((p) => `${p.name} (${p.id.slice(0, 8)}...)`),
+          );
           setPeers(uniquePeers);
           setConnectionState("connected");
           setSessionConnected(true);
         } else if (message.type === "peer-list" && message.peers) {
           // Peer list updated (someone joined/left)
+          const myId = peerIdRef.current;
           console.log("🔄 Peer list updated:", message.peers);
-          // Deduplicate peers
-          const uniquePeers = message.peers.filter(
+          console.log(`👤 My peer ID: ${myId} (${myId.slice(0, 8)}...)`);
+          console.log(`👥 Total peers from server: ${message.peers.length}`);
+
+          // CRITICAL: Filter out self BEFORE setting peers
+          const otherPeers = message.peers.filter((peer) => {
+            const isSelf = peer.id === myId;
+            if (isSelf) {
+              console.log(
+                `🚫 Filtering out SELF: ${peer.name} (${peer.id.slice(0, 8)}...)`,
+              );
+            }
+            return !isSelf;
+          });
+
+          // Deduplicate remaining peers
+          const uniquePeers = otherPeers.filter(
             (peer, index, self) =>
               index === self.findIndex((p) => p.id === peer.id),
           );
-          console.log(`📡 Updating to ${uniquePeers.length} unique peers`);
+
+          console.log(
+            `📡 Updating to ${uniquePeers.length} OTHER peers (filtered self, deduplicated)`,
+          );
+          console.log(
+            `📋 Other peer details:`,
+            uniquePeers.map((p) => `${p.name} (${p.id.slice(0, 8)}...)`),
+          );
           setPeers(uniquePeers);
           setConnectionState("connected");
           setSessionConnected(true);
@@ -144,6 +205,7 @@ export function useWebRTC() {
       setConnectionError("Failed to connect to signaling server");
       setConnectionState("failed");
       hasInitializedRef.current = false;
+      isJoiningRef.current = false;
     }
   }, [
     session,
@@ -183,6 +245,7 @@ export function useWebRTC() {
     }
 
     hasInitializedRef.current = false;
+    isJoiningRef.current = false;
     setIsConnected(false);
     setConnectionState("disconnected");
     setSessionConnected(false);

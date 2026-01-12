@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Copy, Check, Share2, QrCode } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import QRCode from "react-qr-code";
@@ -18,13 +18,26 @@ interface ShareLinkProps {
 export function ShareLink({ url }: ShareLinkProps) {
   const [copied, setCopied] = useState(false);
 
+  // Log QR code URL whenever it changes
+  useEffect(() => {
+    if (url) {
+      console.log("🔗 [ShareLink] QR Code URL generated:");
+      console.log(`  - Full URL: ${url}`);
+      console.log(
+        `  - Session ID: ${url.split("#session=")[1] || "NOT FOUND"}`,
+      );
+      console.log(`  ✅ Scan this QR code to join session`);
+    }
+  }, [url]);
+
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      console.log("📋 [ShareLink] URL copied to clipboard:", url);
     } catch (error) {
-      console.error("Failed to copy URL:", error);
+      console.error("❌ [ShareLink] Failed to copy URL:", error);
     }
   };
 
@@ -87,18 +100,24 @@ export function ShareLink({ url }: ShareLinkProps) {
         </DialogTrigger>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Scan QR Code</DialogTitle>
+            <DialogTitle>Share with QR Code</DialogTitle>
             <DialogDescription>
-              Scan this QR code with another device to connect
+              Scan this QR code with your mobile device to join
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col items-center gap-4 py-4">
             <div className="p-4 bg-white rounded-lg">
               <QRCode value={url} size={256} />
             </div>
-            <p className="text-sm text-muted-foreground text-center max-w-xs">
-              {url}
-            </p>
+            <div className="text-sm text-muted-foreground text-center space-y-2">
+              <p className="font-medium">Session URL:</p>
+              <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
+                {url}
+              </code>
+              <p className="text-xs text-green-600 dark:text-green-400">
+                ✅ QR code contains this URL
+              </p>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

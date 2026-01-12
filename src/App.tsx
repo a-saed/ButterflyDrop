@@ -21,7 +21,7 @@ import { toast } from "sonner";
 import { Upload, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDropzone } from "react-dropzone";
-import { PeerDiscoveryDebug } from "@/components/debug/PeerDiscoveryDebug";
+import { ConnectionStatusDebug } from "@/components/debug/ConnectionStatus";
 
 function AppContent() {
   const session = useSession();
@@ -345,7 +345,7 @@ function AppContent() {
       </div>
 
       <Toaster />
-      <PeerDiscoveryDebug />
+      <ConnectionStatusDebug />
     </div>
   );
 }

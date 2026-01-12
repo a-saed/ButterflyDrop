@@ -12,71 +12,47 @@ export interface Peer {
 
 /**
  * Modern P2P peer discovery hook
- * Discovers peers in the same network with proper deduplication
- * All peers are equal - no sender/receiver distinction
+ * Note: Filtering of self is done in useWebRTC_v2 before peers reach here
+ * This hook just converts PeerInfo to Peer format
  */
 export function usePeerDiscovery() {
-  const { session, peers: networkPeers, myPeerId } = useSession();
+  const { session, peers: networkPeers } = useSession();
   const { connectionState } = useConnection();
 
-  // Modern P2P peer discovery with robust deduplication
+  // Convert networkPeers to Peer interface
+  // Filtering is already done in useWebRTC_v2, so we just transform here
   const peers = useMemo<Peer[]>(() => {
-    console.log(`[usePeerDiscovery] 🔍 Starting P2P peer discovery:`);
-    console.log(`  - session exists: ${!!session}`);
-    console.log(`  - session ID: ${session?.id}`);
-    console.log(`  - networkPeers count: ${networkPeers.length}`);
-    console.log(`  - myPeerId: ${myPeerId}`);
+    console.log(`[usePeerDiscovery] 🔍 Processing peers:`);
+    console.log(`  - session: ${session?.id || "none"}`);
+    console.log(`  - networkPeers: ${networkPeers.length}`);
     console.log(`  - connectionState: ${connectionState}`);
-    console.log(`  - raw networkPeers:`, networkPeers);
 
     if (!session) {
-      console.log("❌ No session available");
       return [];
     }
 
     if (networkPeers.length === 0) {
-      console.log("📡 No network peers available yet");
+      console.log("📡 No peers available yet");
       return [];
     }
 
-    // Step 1: Deduplicate by peer ID (server should handle this, but safety net)
-    const uniqueNetworkPeers = networkPeers.filter(
-      (peer, index, self) => index === self.findIndex((p) => p.id === peer.id),
-    );
-
-    if (uniqueNetworkPeers.length !== networkPeers.length) {
-      console.warn(
-        `⚠️ Found duplicate peers! Filtered ${networkPeers.length} -> ${uniqueNetworkPeers.length}`,
-      );
-    }
-
-    // Step 2: Filter out self (if myPeerId is set)
-    const otherPeers = myPeerId
-      ? uniqueNetworkPeers.filter((peer) => {
-          const isSelf = peer.id === myPeerId;
-          if (isSelf) {
-            console.log(`🚫 Filtering out self: ${peer.name} (${peer.id})`);
-          }
-          return !isSelf;
-        })
-      : uniqueNetworkPeers; // If myPeerId not set yet, show all peers
-
-    // Step 3: Convert to Peer interface
-    const peerList = otherPeers.map((peerInfo) => ({
+    // Convert PeerInfo to Peer interface
+    // Self should already be filtered out by useWebRTC_v2
+    const peerList = networkPeers.map((peerInfo) => ({
       id: peerInfo.id,
       name: peerInfo.name,
       deviceType: peerInfo.deviceType as Peer["deviceType"],
       isOnline: peerInfo.isOnline,
-      lastSeen: Date.now(), // Mark as recently seen
+      lastSeen: Date.now(),
     }));
 
     console.log(
-      `✅ Discovered ${peerList.length} peers:`,
+      `✅ Returning ${peerList.length} peers:`,
       peerList.map((p) => `${p.name} (${p.id.slice(0, 8)}...)`),
     );
 
     return peerList;
-  }, [session, networkPeers, myPeerId, connectionState]);
+  }, [session, networkPeers, connectionState]);
 
   // Modern P2P scanning state
   const isScanning = useMemo(() => {

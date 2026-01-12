@@ -142,24 +142,47 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
         sessions.set(sessionId, session);
       }
 
-      // Check for duplicate peer ID (prevent duplicates)
+      // Check if peer already exists in this session
       if (session.peers?.has(peerId)) {
-        console.log(
-          `Peer ${peerId} already exists in session ${sessionId}, updating connection`,
-        );
-        // Update existing peer's connection (handle reconnection)
+        console.log(`⚠️ Peer ${peerId} already exists in session ${sessionId}`);
+        console.log(`   Checking if it's a reconnection or duplicate...`);
+
         const existingPeer = session.peers.get(peerId);
         if (existingPeer) {
-          // Close old connection if different
-          if (existingPeer.ws !== ws) {
-            existingPeer.ws.close();
+          // Check if it's the SAME connection (duplicate message)
+          if (existingPeer.ws === ws) {
+            console.log(
+              `   ℹ️ Same connection, ignoring duplicate join request`,
+            );
+            // Don't broadcast, just send confirmation
+            ws.send(
+              JSON.stringify({
+                type: type,
+                sessionId,
+                peers: getPeerList(sessionId),
+                success: true,
+              }),
+            );
+            return; // Exit early
+          } else {
+            // Different connection - it's a reconnection
+            console.log(`   🔄 Different connection, treating as reconnection`);
+            console.log(`   Closing old connection and updating...`);
+            try {
+              existingPeer.ws.close();
+            } catch (e) {
+              console.log(`   Failed to close old connection:`, e);
+            }
+            // Update with new connection
+            existingPeer.ws = ws;
+            existingPeer.joinedAt = Date.now();
+            console.log(
+              `   ✅ Peer ${peerName} (${peerId}) reconnected to session ${sessionId}`,
+            );
           }
-          // Update connection
-          existingPeer.ws = ws;
-          existingPeer.joinedAt = Date.now();
         }
       } else {
-        // Add new peer to network
+        // New peer - add to network
         const peerConn: PeerConnection = {
           ws,
           peerId,
@@ -172,7 +195,9 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
           session.peers = new Map();
         }
         session.peers.set(peerId, peerConn);
-        console.log(`Peer ${peerName} (${peerId}) joined session ${sessionId}`);
+        console.log(
+          `✅ Peer ${peerName} (${peerId}) joined session ${sessionId}`,
+        );
       }
 
       // Get current peer list (will exclude self automatically)
@@ -407,14 +432,16 @@ const wss = new WebSocketServer({
   clientTracking: true,
 });
 
-// Start HTTP server
-httpServer.listen(PORT, () => {
+// Start HTTP server on all interfaces (0.0.0.0) for LAN access
+httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Butterfly Drop Signaling Server started`);
   console.log(`📡 Environment: ${NODE_ENV}`);
   console.log(`🔌 Port: ${PORT}`);
   console.log(`📊 Active sessions: ${sessions.size}`);
   console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+  console.log(`📱 LAN access: http://192.168.0.136:${PORT}/health`);
   console.log(`✅ WebSocket server ready for connections`);
+  console.log(`🌐 Listening on all network interfaces (0.0.0.0)`);
 });
 
 wss.on("connection", (ws: WebSocket, req) => {

@@ -76,21 +76,36 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const setPeersWithLogging = useCallback(
     (newPeers: PeerInfo[]) => {
-      console.log(`[SessionContext] Setting peers:`, newPeers);
+      console.log(`[SessionContext] 📡 Setting peers:`, newPeers);
       console.log(`  - Peer count: ${newPeers.length}`);
       console.log(`  - Peer names: ${newPeers.map((p) => p.name).join(", ")}`);
-      console.log(`  - Peer IDs: ${newPeers.map((p) => p.id).join(", ")}`);
+      console.log(
+        `  - Peer IDs (full): ${newPeers.map((p) => p.id).join(", ")}`,
+      );
+      console.log(
+        `  - Peer IDs (short): ${newPeers.map((p) => p.id.slice(0, 8)).join(", ")}`,
+      );
       console.log(`  - My peer ID: ${myPeerId}`);
+      console.log(`  - My peer ID (short): ${myPeerId?.slice(0, 8)}`);
       console.log(`  - Setting peers at:`, new Date().toLocaleTimeString());
 
       // Check for timing issues
       if (newPeers.length > 0 && !myPeerId) {
         console.warn(
-          `[SessionContext] WARNING: Peers received but myPeerId not set yet!`,
+          `[SessionContext] ⚠️ WARNING: Peers received but myPeerId not set yet!`,
+        );
+      }
+
+      // Check if any peer matches myPeerId
+      const matchesSelf = newPeers.some((p) => p.id === myPeerId);
+      if (matchesSelf) {
+        console.warn(
+          `[SessionContext] ⚠️ WARNING: Peer list includes self! This should be filtered.`,
         );
       }
 
       setPeers(newPeers);
+      console.log(`[SessionContext] ✅ Peers state updated`);
     },
     [myPeerId],
   );
