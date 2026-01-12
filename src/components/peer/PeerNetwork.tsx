@@ -1,28 +1,31 @@
-import { PeerAvatar } from './PeerAvatar'
-import { Wifi } from 'lucide-react'
-import { useMemo } from 'react'
+import { PeerAvatar } from "./PeerAvatar";
+import { Wifi, Loader2 } from "lucide-react";
+import { useMemo } from "react";
 
 interface Peer {
-  id: string
-  name: string
-  deviceType: 'desktop' | 'mobile' | 'tablet' | 'laptop'
-  isOnline: boolean
-  lastSeen?: number
+  id: string;
+  name: string;
+  deviceType: "desktop" | "mobile" | "tablet" | "laptop";
+  isOnline: boolean;
+  lastSeen?: number;
 }
 
 interface PeerNetworkProps {
-  peers: Peer[]
-  selectedPeerId?: string
-  onPeerSelect?: (peerId: string) => void
-  hasFiles?: boolean
+  peers: Peer[];
+  selectedPeerId?: string;
+  onPeerSelect?: (peerId: string) => void;
+  hasFiles?: boolean;
+  readyPeers?: string[];
 }
 
 /**
  * Generate random but consistent positions for peers
  */
-function generatePeerPositions(peers: Peer[]): Map<string, { x: number; y: number }> {
-  const positions = new Map<string, { x: number; y: number }>()
-  
+function generatePeerPositions(
+  peers: Peer[],
+): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>();
+
   // Define safe zones (avoid edges and center)
   const safeZones = [
     { x: 20, y: 25 },
@@ -34,18 +37,24 @@ function generatePeerPositions(peers: Peer[]): Map<string, { x: number; y: numbe
     { x: 50, y: 80 },
     { x: 25, y: 35 },
     { x: 75, y: 35 },
-  ]
+  ];
 
   peers.forEach((peer, index) => {
-    const position = safeZones[index % safeZones.length]
-    positions.set(peer.id, position)
-  })
+    const position = safeZones[index % safeZones.length];
+    positions.set(peer.id, position);
+  });
 
-  return positions
+  return positions;
 }
 
-export function PeerNetwork({ peers, selectedPeerId, onPeerSelect, hasFiles }: PeerNetworkProps) {
-  const peerPositions = useMemo(() => generatePeerPositions(peers), [peers])
+export function PeerNetwork({
+  peers,
+  selectedPeerId,
+  onPeerSelect,
+  hasFiles,
+  readyPeers = [],
+}: PeerNetworkProps) {
+  const peerPositions = useMemo(() => generatePeerPositions(peers), [peers]);
 
   if (peers.length === 0) {
     return (
@@ -55,19 +64,22 @@ export function PeerNetwork({ peers, selectedPeerId, onPeerSelect, hasFiles }: P
             <Wifi className="h-16 w-16 text-muted-foreground/50" />
             <div className="absolute inset-0 bg-muted-foreground/10 rounded-full blur-xl animate-pulse" />
           </div>
-          <p className="text-sm text-muted-foreground mb-1">Scanning for devices...</p>
+          <p className="text-sm text-muted-foreground mb-1">
+            Scanning for devices...
+          </p>
           <p className="text-xs text-muted-foreground/70">
             Make sure other devices are on the same network
           </p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
     <div className="relative w-full h-full">
       {peers.map((peer) => {
-        const position = peerPositions.get(peer.id) || { x: 50, y: 50 }
+        const position = peerPositions.get(peer.id) || { x: 50, y: 50 };
+        const isReady = readyPeers.includes(peer.id);
         return (
           <PeerAvatar
             key={peer.id}
@@ -76,10 +88,10 @@ export function PeerNetwork({ peers, selectedPeerId, onPeerSelect, hasFiles }: P
             isSelected={selectedPeerId === peer.id}
             onClick={() => onPeerSelect?.(peer.id)}
             hasFiles={hasFiles && selectedPeerId === peer.id}
+            isReady={isReady}
           />
-        )
+        );
       })}
     </div>
-  )
+  );
 }
-

@@ -31,10 +31,10 @@ export function useSession() {
       // Create new session if none exists
       console.log("🆕 [useSession] No session in URL, creating new session");
       const newSession = sessionContext.createSession();
-      // Update URL with session ID
-      const shareableUrl = createShareableUrl(newSession.id);
-      console.log(`🔗 [useSession] Updating URL to: ${shareableUrl}`);
-      window.history.replaceState(null, "", shareableUrl);
+      // Update URL with session ID (only update hash, not full URL)
+      const newHash = `#session=${newSession.id}`;
+      console.log(`🔗 [useSession] Updating URL hash to: ${newHash}`);
+      window.history.replaceState(null, "", newHash);
       console.log(
         `✅ [useSession] URL updated with session ID: ${newSession.id}`,
       );

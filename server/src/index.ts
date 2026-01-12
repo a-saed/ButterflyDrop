@@ -228,7 +228,7 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
     }
 
     case "offer": {
-      // Sender sends offer, forward to receiver
+      // P2P: Forward offer to target peer
       if (!sessionId) {
         console.error("Session ID missing in offer");
         ws.send(
@@ -240,23 +240,60 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
         );
         return;
       }
-      const session = sessions.get(sessionId);
-      if (!session || !session.receiver) {
+
+      const targetPeerId = message.peerId;
+      if (!targetPeerId) {
+        console.error("Target peer ID missing in offer");
         ws.send(
           JSON.stringify({
             type: "error",
             sessionId,
-            error: "No receiver connected",
+            error: "Target peer ID required",
           }),
         );
         return;
       }
 
-      console.log(`Forwarding offer for session: ${sessionId}`);
-      session.receiver.send(
+      const session = sessions.get(sessionId);
+      if (!session || !session.peers) {
+        ws.send(
+          JSON.stringify({
+            type: "error",
+            sessionId,
+            error: "Session not found",
+          }),
+        );
+        return;
+      }
+
+      const targetPeer = session.peers.get(targetPeerId);
+      if (!targetPeer) {
+        ws.send(
+          JSON.stringify({
+            type: "error",
+            sessionId,
+            error: "Target peer not found",
+          }),
+        );
+        return;
+      }
+
+      // Find sender peer ID
+      let senderPeerId: string | undefined;
+      session.peers.forEach((peer) => {
+        if (peer.ws === ws) {
+          senderPeerId = peer.peerId;
+        }
+      });
+
+      console.log(
+        `Forwarding offer from ${senderPeerId} to peer ${targetPeerId} in session ${sessionId}`,
+      );
+      targetPeer.ws.send(
         JSON.stringify({
           type: "offer",
           sessionId,
+          peerId: senderPeerId, // Include sender ID so client knows who sent the offer
           data,
         }),
       );
@@ -264,7 +301,7 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
     }
 
     case "answer": {
-      // Receiver sends answer, forward to sender
+      // P2P: Forward answer back to the peer who sent the offer
       if (!sessionId) {
         console.error("Session ID missing in answer");
         ws.send(
@@ -276,23 +313,61 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
         );
         return;
       }
+
       const session = sessions.get(sessionId);
-      if (!session || !session.sender) {
+      if (!session || !session.peers) {
         ws.send(
           JSON.stringify({
             type: "error",
             sessionId,
-            error: "No sender connected",
+            error: "Session not found",
           }),
         );
         return;
       }
 
-      console.log(`Forwarding answer for session: ${sessionId}`);
-      session.sender.send(
+      // Answer should go to the target peer ID specified in the message
+      const targetPeerId = message.peerId;
+      if (!targetPeerId) {
+        console.error("Target peer ID missing in answer");
+        ws.send(
+          JSON.stringify({
+            type: "error",
+            sessionId,
+            error: "Target peer ID required",
+          }),
+        );
+        return;
+      }
+
+      const targetPeer = session.peers.get(targetPeerId);
+      if (!targetPeer) {
+        ws.send(
+          JSON.stringify({
+            type: "error",
+            sessionId,
+            error: "Target peer not found",
+          }),
+        );
+        return;
+      }
+
+      // Find sender peer ID
+      let senderPeerId: string | undefined;
+      session.peers.forEach((peer) => {
+        if (peer.ws === ws) {
+          senderPeerId = peer.peerId;
+        }
+      });
+
+      console.log(
+        `Forwarding answer from ${senderPeerId} to peer ${targetPeerId} in session ${sessionId}`,
+      );
+      targetPeer.ws.send(
         JSON.stringify({
           type: "answer",
           sessionId,
+          peerId: senderPeerId, // Include sender ID so client knows who sent the answer
           data,
         }),
       );
@@ -300,7 +375,7 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
     }
 
     case "ice-candidate": {
-      // Forward ICE candidate to the other peer
+      // P2P: Forward ICE candidate to the other peer(s)
       if (!sessionId) {
         console.error("Session ID missing in ice-candidate");
         ws.send(
@@ -312,8 +387,9 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
         );
         return;
       }
+
       const session = sessions.get(sessionId);
-      if (!session) {
+      if (!session || !session.peers) {
         ws.send(
           JSON.stringify({
             type: "error",
@@ -324,26 +400,44 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
         return;
       }
 
-      // Determine which peer sent this and forward to the other
-      const target = ws === session.sender ? session.receiver : session.sender;
-      if (!target) {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            sessionId,
-            error: "Other peer not connected",
-          }),
-        );
+      // ICE candidate should go to the target peer ID specified in the message
+      const targetPeerId = message.peerId;
+      if (!targetPeerId) {
+        console.error("Target peer ID missing in ice-candidate");
         return;
       }
 
-      console.log(`Forwarding ICE candidate for session: ${sessionId}`);
-      target.send(
+      const targetPeer = session.peers.get(targetPeerId);
+      if (!targetPeer || targetPeer.ws.readyState !== WebSocket.OPEN) {
+        console.error(`Target peer ${targetPeerId} not found or not connected`);
+        return;
+      }
+
+      // Find sender peer ID
+      let senderPeerId: string | undefined;
+      session.peers.forEach((peer) => {
+        if (peer.ws === ws) {
+          senderPeerId = peer.peerId;
+        }
+      });
+
+      console.log(
+        `Forwarding ICE candidate from ${senderPeerId} to peer ${targetPeerId} in session ${sessionId}`,
+      );
+
+      targetPeer.ws.send(
         JSON.stringify({
           type: "ice-candidate",
           sessionId,
+          peerId: senderPeerId, // Include sender ID so client knows who sent the candidate
           data,
         }),
+      );
+
+      let forwardedCount = 1;
+
+      console.log(
+        `Forwarded ICE candidate to ${forwardedCount} peer(s) in session ${sessionId}`,
       );
       break;
     }

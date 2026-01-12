@@ -24,14 +24,18 @@ export function createPeerConnection(config?: Partial<WebRTCConfig>): RTCPeerCon
 
 /**
  * Create data channel for file transfer
+ * CRITICAL: Use reliable mode for file transfers
  */
 export function createDataChannel(
   peerConnection: RTCPeerConnection,
   label: string = 'file-transfer'
 ): RTCDataChannel {
+  // For file transfers, we MUST have reliable delivery
+  // Don't specify maxRetransmits or maxPacketLifeTime for reliable mode
   return peerConnection.createDataChannel(label, {
     ordered: true,
-    maxRetransmits: 0,
+    // NO maxRetransmits: 0 - that disables retransmissions!
+    // Reliable mode is default when these are omitted
   })
 }
 

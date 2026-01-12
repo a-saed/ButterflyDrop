@@ -1,6 +1,31 @@
 import type { FileMetadata, FolderMetadata } from '@/types/transfer'
 
-const CHUNK_SIZE = 262144 // 256 KB
+// Optimal chunk size for WebRTC DataChannel
+// 16 KB is the sweet spot: fast enough, small enough to avoid drops
+const CHUNK_SIZE = 16384 // 16 KB
+
+/**
+ * Generate a UUID - uses crypto.randomUUID if available, otherwise falls back to a custom implementation
+ * Compatible with older browsers and mobile devices
+ */
+function generateUUID(): string {
+  // Use crypto.randomUUID if available (modern browsers)
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // Fall through to fallback
+    }
+  }
+  
+  // Fallback: Generate UUID v4 manually
+  // Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 /**
  * Get chunk size for file transfer
@@ -52,7 +77,7 @@ export function createFileMetadata(
   path?: string
 ): FileMetadata {
   return {
-    id: id || crypto.randomUUID(),
+    id: id || generateUUID(),
     name: file.name,
     size: file.size,
     type: file.type || 'application/octet-stream',
@@ -78,7 +103,7 @@ export function createFolderMetadata(
     const folderPath = pathParts.slice(0, -1).join('/')
 
     const fileMeta: FileMetadata = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       name: fileName,
       size: file.size,
       type: file.type || 'application/octet-stream',
@@ -133,11 +158,18 @@ export function createFolderMetadata(
  * Sanitize file name for safe transfer
  */
 export function sanitizeFileName(fileName: string): string {
-  // Remove or replace dangerous characters
-  return fileName
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
-    .replace(/^\.+/, '') // Remove leading dots
-    .trim()
+  const unsafe = '<>:"/\\|?*';
+  const cleaned = Array.from(fileName)
+    .map((ch) => {
+      const code = ch.charCodeAt(0);
+      if (code < 32 || unsafe.includes(ch)) {
+        return '_';
+      }
+      return ch;
+    })
+    .join('');
+
+  return cleaned.replace(/^\.+/, '').trim(); // Remove leading dots and trim
 }
 
 /**

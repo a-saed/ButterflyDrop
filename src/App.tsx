@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { SessionProvider } from "@/contexts/SessionContext";
 import { ConnectionProvider } from "@/contexts/ConnectionContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
@@ -11,7 +11,8 @@ import { AmbientBackground } from "@/components/layout/AmbientBackground";
 import { ButterflyLogo } from "@/components/layout/ButterflyLogo";
 import { PeerNetwork } from "@/components/peer/PeerNetwork";
 import { FileList } from "@/components/transfer/FileList";
-import { TransferProgress } from "@/components/transfer/TransferProgress";
+import { SendProgressPanel } from "@/components/transfer/SendProgressPanel";
+import { ReceivedFilesPanel } from "@/components/transfer/ReceivedFilesPanel";
 import { ShareLink } from "@/components/connection/ShareLink";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { ConnectionStatus } from "@/components/connection/ConnectionStatus";
@@ -21,58 +22,137 @@ import { toast } from "sonner";
 import { Upload, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDropzone } from "react-dropzone";
-import { ConnectionStatusDebug } from "@/components/debug/ConnectionStatus";
 
 function AppContent() {
   const session = useSession();
   const { peers, isScanning } = usePeerDiscovery();
   const { connectionState } = useConnection();
-  const { isConnected, dataChannel } = useWebRTC();
+  const { getDataChannelForPeer, getQueuedMessagesForPeer, isPeerReady, readyPeers } = useWebRTC();
+  
+  // File transfer with new API
   const {
-    currentTransfer,
-    isTransferring,
-    isComplete,
-    error: transferError,
+    // Sending state
+    isSending,
+    sendingToPeer,
+    sendProgress,
+    sendComplete,
+    sendError,
+    // Receiving state  
+    isReceiving,
+    receivingFromPeer,
+    receiveProgress,
+    receiveComplete,
+    receiveError,
+    // Incoming transfer
+    incomingTransfer,
+    // Received files
+    receivedFiles,
+    // Actions
     sendFiles,
     setupReceiver,
+    downloadFile,
+    downloadAllFiles,
+    clearReceivedFiles,
+    resetSendState,
+    // Helpers
+    formatBytes,
   } = useFileTransfer();
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedPeerId, setSelectedPeerId] = useState<string>();
+  
+  // Track which peers have receivers set up
+  const setupPeersRef = useRef<Set<string>>(new Set());
 
   const shareableUrl = session.session
     ? createShareableUrl(session.session.id)
     : "";
 
-  // Setup file receiver when data channel is ready (all peers can receive)
+  // Setup file receiver for all ready peers
+  // This is CRITICAL - must set up onmessage handler before files arrive
   useEffect(() => {
-    if (session.session && dataChannel && isConnected) {
-      setupReceiver();
-    }
-  }, [session.session, dataChannel, isConnected, setupReceiver]);
-
-  // Show connection status
-  useEffect(() => {
-    if (connectionState === "connected" && isConnected) {
-      toast.success("Connected to peer!", {
-        icon: "🦋",
-        description: session.peerName || "Ready to transfer files",
+    if (session.session && readyPeers.length > 0) {
+      readyPeers.forEach((peerId) => {
+        // Skip if already set up
+        if (setupPeersRef.current.has(peerId)) return;
+        
+        const dataChannel = getDataChannelForPeer(peerId);
+        if (dataChannel && dataChannel.readyState === "open") {
+          const peer = peers.find((p) => p.id === peerId);
+          const peerName = peer?.name || "Unknown Device";
+          
+          // Get any messages that were queued before we set up the handler
+          const queuedMessages = getQueuedMessagesForPeer(peerId);
+          
+          console.log(`🔧 Setting up receiver for ${peerName} (${peerId})`);
+          setupReceiver(peerId, peerName, dataChannel, queuedMessages);
+          setupPeersRef.current.add(peerId);
+        }
       });
+    }
+  }, [session.session, readyPeers, peers, getDataChannelForPeer, getQueuedMessagesForPeer, setupReceiver]);
+
+  // Show connection status when peers become ready
+  useEffect(() => {
+    if (readyPeers.length > 0) {
+      const newPeers = readyPeers.filter((id) => !setupPeersRef.current.has(id));
+      if (newPeers.length > 0) {
+        const peerNames = peers
+          .filter((p) => newPeers.includes(p.id))
+          .map((p) => p.name)
+          .join(", ");
+
+        if (peerNames) {
+          toast.success(`Connected with ${peerNames}`, {
+            icon: "🦋",
+            duration: 3000,
+          });
+        }
+      }
     } else if (connectionState === "failed") {
       toast.error("Connection failed", {
-        description: "Please check your network connection",
+        description: "Check your network and try refreshing",
+        duration: 4000,
       });
     }
-  }, [connectionState, isConnected, session.peerName]);
+  }, [connectionState, readyPeers, peers]);
 
-  // Show transfer errors
+  // Show send errors
   useEffect(() => {
-    if (transferError) {
-      toast.error("Transfer error", {
-        description: transferError,
+    if (sendError) {
+      toast.error("Send failed", {
+        description: sendError,
+        duration: 4000,
       });
     }
-  }, [transferError]);
+  }, [sendError]);
+
+  // Show receive errors
+  useEffect(() => {
+    if (receiveError) {
+      toast.error("Receive failed", {
+        description: receiveError,
+        duration: 4000,
+      });
+    }
+  }, [receiveError]);
+
+  // Show receive complete notification
+  useEffect(() => {
+    if (receiveComplete && receivedFiles.length > 0) {
+      const peerName = incomingTransfer?.peerName || 
+        (receivingFromPeer ? peers.find((p) => p.id === receivingFromPeer)?.name : null) || 
+        "peer";
+      toast.success(
+        `${receivedFiles.length} file${receivedFiles.length > 1 ? "s" : ""} received from ${peerName}!`,
+        {
+          icon: "✅",
+          description: "Click to download",
+          duration: 5000,
+        },
+      );
+    }
+  }, [receiveComplete, receivedFiles.length, incomingTransfer, receivingFromPeer, peers]);
 
   // File drop handling
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -80,6 +160,7 @@ function AppContent() {
       setSelectedFiles((prev) => [...prev, ...acceptedFiles]);
       toast.success(
         `${acceptedFiles.length} file${acceptedFiles.length > 1 ? "s" : ""} added`,
+        { icon: "📁" }
       );
     }
   }, []);
@@ -100,86 +181,85 @@ function AppContent() {
 
   const handleSend = useCallback(async () => {
     if (selectedFiles.length === 0) return;
-
-    // Check if connected to P2P network
-    if (!isConnected || !dataChannel) {
-      toast.error("Not connected", {
-        description: "Please wait for peers to connect",
+    if (!selectedPeerId) {
+      toast.error("No peer selected", {
+        description: "Click on a device to select it",
       });
       return;
     }
 
     const peer = peers.find((p) => p.id === selectedPeerId);
+    const peerName = peer?.name || "peer";
 
-    toast.success(
-      `Sending ${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""}...`,
-      {
-        icon: "🦋",
-        description: peer ? `to ${peer.name}` : undefined,
-      },
-    );
+    // Check if peer connection is ready
+    if (!isPeerReady(selectedPeerId)) {
+      toast.info(`Connecting to ${peerName}...`, {
+        description: "Wait for the connection to be established",
+        icon: "⏳",
+        duration: 3000,
+      });
+      return;
+    }
+
+    // Get data channel for this peer
+    const dataChannel = getDataChannelForPeer(selectedPeerId);
+    if (!dataChannel || dataChannel.readyState !== "open") {
+      toast.error(`Cannot connect to ${peerName}`, {
+        description: "Connection lost. Try refreshing the page.",
+        icon: "❌",
+      });
+      return;
+    }
 
     try {
-      await sendFiles(selectedFiles);
+      await sendFiles(selectedFiles, dataChannel, selectedPeerId, peerName);
 
       // Clear files after successful transfer
-      if (isComplete) {
-        setTimeout(() => {
-          setSelectedFiles([]);
-          setSelectedPeerId(undefined);
-        }, 2000);
-      }
+      setTimeout(() => {
+        setSelectedFiles([]);
+      }, 2000);
     } catch (error) {
       console.error("Failed to send files:", error);
-      toast.error("Failed to send files", {
-        description: error instanceof Error ? error.message : "Unknown error",
-      });
+      // Error is already shown via sendError state
     }
   }, [
     selectedFiles,
     selectedPeerId,
     peers,
-    session.session?.role,
-    isConnected,
-    dataChannel,
+    isPeerReady,
+    getDataChannelForPeer,
     sendFiles,
-    isComplete,
   ]);
 
-  const handlePeerSelect = useCallback(
-    (peerId: string) => {
-      // Auto-select the connected peer (only one peer in link-based sessions)
-      if (peers.length > 0 && peers[0].id === peerId) {
-        setSelectedPeerId(peerId);
-        if (selectedFiles.length > 0) {
-          const peer = peers.find((p) => p.id === peerId);
-          toast.info(`Ready to send to ${peer?.name}`, {
-            icon: "📱",
-          });
-        }
-      }
-    },
-    [selectedFiles, peers],
-  );
+  const handlePeerSelect = useCallback((peerId: string) => {
+    setSelectedPeerId(peerId);
+    const peer = peers.find((p) => p.id === peerId);
+    if (peer && selectedFiles.length > 0) {
+      toast.info(`Ready to send to ${peer.name}`, { icon: "📱", duration: 2000 });
+    }
+  }, [selectedFiles, peers]);
 
   // Auto-select first peer when peers are discovered
   useEffect(() => {
     if (peers.length > 0 && !selectedPeerId) {
-      // Use setTimeout to avoid cascading renders
       const timer = setTimeout(() => {
         setSelectedPeerId(peers[0].id);
-      }, 0);
+      }, 100);
       return () => clearTimeout(timer);
     }
   }, [peers, selectedPeerId]);
 
-  // Modern P2P: anyone can send files to anyone
+  // Can send if have files and peer selected and not already transferring
   const canSend =
     selectedFiles.length > 0 &&
-    isConnected &&
-    !isTransferring &&
-    !isComplete &&
-    selectedPeerId; // Must have a peer selected
+    !isSending &&
+    selectedPeerId &&
+    isPeerReady(selectedPeerId);
+
+  // Get selected peer name
+  const selectedPeerName = selectedPeerId 
+    ? peers.find((p) => p.id === selectedPeerId)?.name || "peer"
+    : "";
 
   return (
     <div className="min-h-screen relative" {...getRootProps()}>
@@ -204,10 +284,7 @@ function AppContent() {
       )}
 
       {/* Main Content */}
-      <div
-        className="relative min-h-screen flex flex-col"
-        style={{ zIndex: 10 }}
-      >
+      <div className="relative min-h-screen flex flex-col" style={{ zIndex: 10 }}>
         {/* Header */}
         <header className="flex items-center justify-between p-6 border-b border-border/50 backdrop-blur-sm bg-background/50">
           <div className="flex items-center gap-3">
@@ -227,7 +304,7 @@ function AppContent() {
               </div>
             )}
             <ConnectionStatus
-              peerCount={peers.length}
+              peerCount={readyPeers.length}
               sessionId={session.session?.id || null}
             />
             <ThemeToggle />
@@ -250,68 +327,90 @@ function AppContent() {
               selectedPeerId={selectedPeerId}
               onPeerSelect={handlePeerSelect}
               hasFiles={selectedFiles.length > 0}
+              readyPeers={readyPeers}
             />
           </div>
 
-          {/* Bottom Panel - File Selection */}
+          {/* Bottom Panel - File Selection & Send Progress */}
           <div className="absolute bottom-0 left-0 right-0 px-6 pb-6">
             <div className="max-w-4xl mx-auto space-y-4">
-              {isScanning && (
-                <div className="text-center text-xs text-muted-foreground mb-2">
-                  Scanning for devices...
+              {/* Connection Status */}
+              {isScanning && peers.length === 0 && (
+                <div className="text-center text-sm text-muted-foreground mb-2">
+                  Waiting for devices to connect...
                 </div>
               )}
 
-              {/* File Selection Area */}
-              {selectedFiles.length > 0 ? (
-                <div className="bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl p-4 shadow-2xl">
-                  <FileList
-                    files={selectedFiles}
-                    onRemove={handleRemoveFile}
-                    onClear={handleClearFiles}
-                  />
+              {/* Send Progress Panel */}
+              <SendProgressPanel
+                isSending={isSending}
+                sendProgress={sendProgress}
+                sendComplete={sendComplete}
+                sendError={sendError}
+                peerName={sendingToPeer ? peers.find((p) => p.id === sendingToPeer)?.name || "peer" : selectedPeerName}
+                onReset={resetSendState}
+                formatBytes={formatBytes}
+              />
 
-                  {/* Send Button - Modern P2P: anyone can send */}
-                  {canSend && (
-                    <div className="flex justify-center mt-4">
+              {/* File Selection Area - Only show when not sending */}
+              {!isSending && !sendComplete && (
+                <>
+                  {selectedFiles.length > 0 ? (
+                    <div className="bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl p-4 shadow-2xl">
+                      <FileList
+                        files={selectedFiles}
+                        onRemove={handleRemoveFile}
+                        onClear={handleClearFiles}
+                      />
+
+                      {/* Send Button */}
+                      {canSend && (
+                        <div className="flex justify-center mt-4">
+                          <Button
+                            size="lg"
+                            onClick={handleSend}
+                            className="gap-2 min-w-60 h-12 text-base shadow-lg hover:shadow-xl transition-all"
+                          >
+                            <Send className="h-5 w-5" />
+                            Send {selectedFiles.length} file{selectedFiles.length > 1 ? "s" : ""} to {selectedPeerName}
+                          </Button>
+                        </div>
+                      )}
+
+                      {/* Waiting for peer */}
+                      {selectedFiles.length > 0 && !canSend && peers.length === 0 && (
+                        <div className="text-center mt-4 text-sm text-muted-foreground">
+                          <p>Share the link above to connect with another device</p>
+                        </div>
+                      )}
+
+                      {/* Waiting for connection */}
+                      {selectedFiles.length > 0 && !canSend && peers.length > 0 && selectedPeerId && !isPeerReady(selectedPeerId) && (
+                        <div className="text-center mt-4 text-sm text-muted-foreground">
+                          <p>Establishing connection with {selectedPeerName}...</p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-background/80 backdrop-blur-sm border border-border/50 rounded-2xl p-6 text-center">
+                      <Upload className="h-10 w-10 text-muted-foreground/50 mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground mb-3">
+                        {peers.length > 0 
+                          ? "Drop files anywhere or click to select"
+                          : "Share the link to connect, then drop files to send"
+                        }
+                      </p>
                       <Button
-                        size="lg"
-                        onClick={handleSend}
-                        disabled={!isConnected || isTransferring}
-                        className="gap-2 min-w-60 h-12 text-base shadow-lg hover:shadow-xl transition-all"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => document.getElementById("file-input")?.click()}
                       >
-                        <Send className="h-5 w-5" />
-                        {isTransferring
-                          ? "Sending..."
-                          : `Send ${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""} to ${peers.find((p) => p.id === selectedPeerId)?.name || "peer"}`}
+                        <Upload className="h-4 w-4 mr-2" />
+                        Select Files
                       </Button>
                     </div>
                   )}
-
-                  {/* P2P Network Status */}
-                  {!canSend && isConnected && selectedFiles.length > 0 && (
-                    <div className="text-center mt-4 text-sm text-muted-foreground">
-                      <p>Select a peer to send files to</p>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="bg-background/80 backdrop-blur-sm border border-border/50 rounded-2xl p-6 text-center">
-                  <Upload className="h-10 w-10 text-muted-foreground/50 mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground mb-3">
-                    Drop files anywhere or click to select
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      document.getElementById("file-input")?.click()
-                    }
-                  >
-                    <Upload className="h-4 w-4 mr-2" />
-                    Select Files
-                  </Button>
-                </div>
+                </>
               )}
 
               <input
@@ -325,27 +424,30 @@ function AppContent() {
                     setSelectedFiles((prev) => [...prev, ...files]);
                     toast.success(
                       `${files.length} file${files.length > 1 ? "s" : ""} added`,
+                      { icon: "📁" }
                     );
                   }
                 }}
               />
-
-              {/* Transfer Progress */}
-              {(currentTransfer || isTransferring || isComplete) && (
-                <div className="bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl">
-                  <TransferProgress
-                    progress={currentTransfer}
-                    isComplete={isComplete}
-                  />
-                </div>
-              )}
             </div>
           </div>
         </main>
       </div>
 
+      {/* Received Files Panel - Floating on right side */}
+      <ReceivedFilesPanel
+        incomingTransfer={incomingTransfer}
+        receiveProgress={receiveProgress}
+        isReceiving={isReceiving}
+        receivedFiles={receivedFiles}
+        receiveComplete={receiveComplete}
+        onDownloadFile={downloadFile}
+        onDownloadAll={downloadAllFiles}
+        onClear={clearReceivedFiles}
+        formatBytes={formatBytes}
+      />
+
       <Toaster />
-      <ConnectionStatusDebug />
     </div>
   );
 }
