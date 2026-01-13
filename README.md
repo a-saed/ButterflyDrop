@@ -26,31 +26,47 @@ A cross-platform PWA web app that enables fast, private, peer-to-peer file and f
 ### Prerequisites
 
 - Node.js 18+ and pnpm
-- A WebSocket signaling server (for WebRTC connection setup)
+- A WebSocket signaling server (included in `server/` folder)
 
-### Installation
+### Local Development
 
 ```bash
 # Install dependencies
 pnpm install
 
-# Start development server
+# Install server dependencies
+cd server && pnpm install && cd ..
+
+# Start signaling server (in one terminal)
+cd server && pnpm dev
+
+# Start frontend (in another terminal)
 pnpm dev
-
-# Build for production
-pnpm build
-
-# Preview production build
-pnpm preview
 ```
 
 ### Environment Variables
 
-Create a `.env` file in the root directory:
+For local development, create a `.env.local` file:
 
 ```env
 VITE_SIGNALING_URL=ws://localhost:8080
 ```
+
+### Production Build
+
+```bash
+# Build frontend
+pnpm build
+
+# Build server
+cd server && pnpm build
+```
+
+## 🚀 Deployment
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
+
+**Quick Start**: Deploy backend to **Render** and frontend to **Vercel** (both free tiers available).
 
 ## 📁 Project Structure
 
@@ -108,18 +124,15 @@ src/
 - **Data Channel**: Ordered, no retransmission for file chunks
 - **STUN Servers**: Google's public STUN servers (configurable)
 
-## 🚧 Current Status
+## ✨ Features
 
-This is an MVP implementation. The following features are working:
-
-- ✅ Session creation and management
-- ✅ WebRTC connection setup
-- ✅ File selection (single, multiple, folders)
-- ✅ QR code generation
-- ✅ Transfer progress UI
-- ✅ PWA configuration
-
-**Note**: The receiver-side file reconstruction is simplified in the MVP and may need enhancement for production use.
+- ✅ **Session Management** - Create and join sessions via link or QR code
+- ✅ **WebRTC P2P** - Direct device-to-device file transfer
+- ✅ **File & Folder Support** - Transfer single files, multiple files, or entire folders
+- ✅ **Real-time Progress** - Live transfer progress with speed indicators
+- ✅ **PWA Ready** - Installable on desktop and mobile
+- ✅ **Beautiful UI** - Modern design with butterfly-themed animations
+- ✅ **Cross-platform** - Works on desktop and mobile browsers
 
 ## 📄 License
 
