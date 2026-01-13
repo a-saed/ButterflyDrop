@@ -20,13 +20,9 @@ pnpm start
 
 ## 📦 Deployment
 
-This server is ready to deploy to:
-- **Render** (recommended) - See `render.yaml`
-- **Railway** - See `railway.json`
-- **Fly.io** - Use `fly launch`
-- **Heroku** - See `Procfile`
+This server is configured for deployment to **Render** via `render.yaml` in the root directory.
 
-See [../DEPLOYMENT.md](../DEPLOYMENT.md) for detailed deployment instructions.
+For deployment instructions, see the main [README.md](../README.md) or check the Render configuration in `render.yaml`.
 
 ## ⚙️ Environment Variables
 
@@ -44,40 +40,12 @@ The signaling server facilitates WebRTC connection setup by:
 
 **Important**: No file data ever touches this server - it only handles signaling for WebRTC connection setup.
 
-Minimal WebSocket signaling server for WebRTC peer-to-peer file sharing.
-
 ## Features
 
 - WebSocket-based signaling for SDP/ICE exchange
 - In-memory session management
 - Automatic session cleanup (30min timeout)
 - No file data touches the server (privacy-first)
-
-## Setup
-
-```bash
-cd server
-pnpm install
-```
-
-## Development
-
-```bash
-pnpm dev
-```
-
-Server runs on `ws://localhost:8080` by default.
-
-## Production
-
-```bash
-pnpm build
-pnpm start
-```
-
-## Environment Variables
-
-- `PORT` - WebSocket server port (default: 8080)
 
 ## Message Protocol
 
