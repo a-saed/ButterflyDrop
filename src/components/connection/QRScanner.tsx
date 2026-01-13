@@ -86,12 +86,13 @@ export function QRScanner({
         cameraId || { facingMode: "environment" },
         {
           fps: 10,
-          qrbox: { width: 250, height: 250 },
+          qrbox: { width: 300, height: 300 },
           aspectRatio: 1.0,
+          disableFlip: false,
           videoConstraints: {
             facingMode: "environment",
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
           },
         },
         (decodedText) => {
@@ -205,7 +206,7 @@ export function QRScanner({
         { facingMode: "user" }, // Try front camera as fallback
         {
           fps: 5,
-          qrbox: { width: 200, height: 200 },
+          qrbox: { width: 300, height: 300 },
         },
         (decodedText) => {
           let sessionId: string | null = null;

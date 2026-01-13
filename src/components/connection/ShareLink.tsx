@@ -22,7 +22,8 @@ export function ShareLink({ url }: ShareLinkProps) {
 
   useEffect(() => {
     const updateQrSize = () => {
-      setQrSize(window.innerWidth < 640 ? 200 : 256);
+      // Larger QR codes are easier to scan
+      setQrSize(window.innerWidth < 640 ? 280 : 320);
     };
     updateQrSize();
     window.addEventListener('resize', updateQrSize);
@@ -165,7 +166,11 @@ export function ShareLink({ url }: ShareLinkProps) {
           </DialogHeader>
           <div className="flex flex-col items-center gap-4 py-4">
             <div className="p-3 sm:p-4 bg-white rounded-lg w-full max-w-[280px] sm:max-w-none flex items-center justify-center">
-              <QRCode value={url} size={qrSize} />
+              <QRCode 
+                value={url} 
+                size={qrSize} 
+                level="H"
+              />
             </div>
             <div className="text-sm text-muted-foreground text-center space-y-2">
               <p className="font-medium">Session URL:</p>

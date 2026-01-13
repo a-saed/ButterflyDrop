@@ -76,7 +76,11 @@ export function QRMenu({ shareUrl, onScanSuccess }: QRMenuProps) {
           </DialogHeader>
           <div className="flex flex-col items-center gap-4 py-4">
             <div className="p-4 bg-white rounded-lg">
-              <QRCode value={shareUrl} size={256} />
+              <QRCode 
+                value={shareUrl} 
+                size={256} 
+                level="H"
+              />
             </div>
             <div className="text-sm text-muted-foreground text-center space-y-2 w-full">
               <p className="font-medium">Session URL:</p>
@@ -128,7 +132,16 @@ function QRScannerContent({ onScanSuccess }: { onScanSuccess: (sessionId: string
 
         await html5QrCode.start(
           { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
+          { 
+            fps: 10, 
+            qrbox: { width: 300, height: 300 }, 
+            aspectRatio: 1.0,
+            videoConstraints: {
+              facingMode: "environment",
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+          },
           (decodedText) => {
             let sessionId: string | null = null;
             try {
