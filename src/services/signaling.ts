@@ -27,9 +27,11 @@ export class SignalingClient {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
+        console.log(`🔌 Attempting WebSocket connection to: ${this.url}`);
         this.ws = new WebSocket(this.url);
 
         this.ws.onopen = () => {
+          console.log(`✅ WebSocket connected to: ${this.url}`);
           this.reconnectAttempts = 0;
           this.emit("open");
           resolve();
@@ -46,16 +48,20 @@ export class SignalingClient {
           }
         };
 
-        this.ws.onclose = () => {
+        this.ws.onclose = (event) => {
+          console.log(`⚠️ WebSocket closed: code=${event.code}, reason=${event.reason || "none"}`);
           this.emit("close");
           this.attemptReconnect();
         };
 
         this.ws.onerror = (error) => {
+          console.error(`❌ WebSocket error connecting to ${this.url}:`, error);
+          console.error(`   Check if the signaling server is running and accessible`);
           this.emit("error", error);
           reject(error);
         };
       } catch (error) {
+        console.error(`❌ Failed to create WebSocket to ${this.url}:`, error);
         reject(error);
       }
     });

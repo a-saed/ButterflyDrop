@@ -117,40 +117,87 @@ export function useFileTransfer() {
 
   const setupChannelsRef = useRef<Set<string>>(new Set());
 
-  // Conservative buffer management to prevent drops
-  const LOW_THRESHOLD = 32 * 1024; // 32 KB
+  // Adaptive flow control thresholds
+  const BUFFER_LOW = 64 * 1024;   // 64 KB - safe to send aggressively
+  const BUFFER_HIGH = 512 * 1024;   // 512 KB - pause
 
   /**
-   * Wait for buffer to drain properly
+   * Adaptive flow control - window-based sending
+   * Instead of waiting for buffer=0, send multiple chunks then check
    */
-  const waitForBuffer = useCallback(async (dataChannel: RTCDataChannel) => {
-    // Always wait if there's ANY data in buffer
-    if (dataChannel.bufferedAmount === 0) {
-      return;
+  interface FlowControlState {
+    windowSize: number;
+    lastCheck: number;
+  }
+  
+  const flowControlRef = useRef<Map<RTCDataChannel, FlowControlState>>(new Map());
+
+  /**
+   * Get or create flow control state for a channel
+   */
+  const getFlowControlState = useCallback((channel: RTCDataChannel): FlowControlState => {
+    if (!flowControlRef.current.has(channel)) {
+      flowControlRef.current.set(channel, {
+        windowSize: 4, // Start with 4 chunks per window
+        lastCheck: Date.now(),
+      });
+    }
+    return flowControlRef.current.get(channel)!;
+  }, []);
+
+  /**
+   * Adapt window size based on buffer level
+   */
+  const adaptWindowSize = useCallback((channel: RTCDataChannel) => {
+    const state = getFlowControlState(channel);
+    const bufferRatio = channel.bufferedAmount / BUFFER_HIGH;
+    
+    if (bufferRatio < 0.25) {
+      // Buffer is low - send more aggressively
+      state.windowSize = Math.min(Math.floor(state.windowSize * 1.5), 16);
+    } else if (bufferRatio < 0.5) {
+      // Buffer is medium - maintain current rate
+      // No change
+    } else if (bufferRatio < 0.75) {
+      // Buffer is getting high - slow down
+      state.windowSize = Math.max(Math.floor(state.windowSize * 0.8), 2);
+    } else {
+      // Buffer is very high - pause
+      state.windowSize = 1;
     }
     
+    console.log(`🔄 Window size: ${state.windowSize}, buffer: ${(channel.bufferedAmount / 1024).toFixed(0)} KB`);
+  }, [getFlowControlState, BUFFER_HIGH]);
+
+  /**
+   * Wait for buffer to drain to acceptable level
+   */
+  const waitForBuffer = useCallback(async (dataChannel: RTCDataChannel) => {
+    // If buffer is already low, no need to wait
+    if (dataChannel.bufferedAmount < BUFFER_LOW) {
+        return;
+      }
+
     return new Promise<void>((resolve) => {
-      // Set low threshold for event
-      dataChannel.bufferedAmountLowThreshold = LOW_THRESHOLD;
+      dataChannel.bufferedAmountLowThreshold = BUFFER_LOW;
       
       const checkBuffer = () => {
-        if (dataChannel.bufferedAmount === 0) {
+        if (dataChannel.bufferedAmount < BUFFER_LOW) {
           resolve();
         } else {
-          setTimeout(checkBuffer, 5);
+          setTimeout(checkBuffer, 10);
         }
       };
       
-      // Listen for low buffer event
       const handler = () => {
         dataChannel.removeEventListener('bufferedamountlow', handler);
-        checkBuffer();
+        resolve();
       };
       
       dataChannel.addEventListener('bufferedamountlow', handler);
-      checkBuffer(); // Also poll
+      checkBuffer();
     });
-  }, [LOW_THRESHOLD]);
+  }, [BUFFER_LOW]);
 
   const formatBytes = useCallback((bytes: number): string => {
     if (bytes === 0) return "0 B";
@@ -488,7 +535,7 @@ export function useFileTransfer() {
         type: "file",
         files: fileMetadata,
       };
-      
+
       dataChannel.send(JSON.stringify({
         type: "metadata",
         data: metadata,
@@ -498,56 +545,72 @@ export function useFileTransfer() {
       console.log(`📋 Sent metadata`);
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      const chunkSize = getChunkSize();
+      // Get optimal chunk size based on total file size
+      const chunkSize = getChunkSize(totalBytes);
+      console.log(`📦 Using chunk size: ${(chunkSize / 1024).toFixed(0)} KB for ${(totalBytes / 1024 / 1024).toFixed(1)} MB total`);
+      
       let lastUpdate = Date.now();
+      const flowState = getFlowControlState(dataChannel);
 
       // Send each file
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const fileMeta = fileMetadata[i];
-        
-        console.log(`📦 Sending: ${file.name}`);
 
-        let sequenceNumber = 0;
-        let fileBytesTransferred = 0;
+        console.log(`📦 Sending: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`);
 
-        for await (const chunk of readFileInChunks(file, chunkSize)) {
+        const chunks: ArrayBuffer[] = [];
+
+        // Collect chunks first (for window-based sending)
+          for await (const chunk of readFileInChunks(file, chunkSize)) {
+          chunks.push(chunk);
+        }
+
+        // Send chunks in windows
+        let chunkIndex = 0;
+        while (chunkIndex < chunks.length) {
           if (dataChannel.readyState !== "open") {
             throw new Error("Connection lost");
           }
 
-          // CRITICAL: Wait for buffer to be completely empty
+          // Check buffer and adapt window size
+          adaptWindowSize(dataChannel);
+          const windowSize = flowState.windowSize;
+
+          // Send a window of chunks
+          const windowEnd = Math.min(chunkIndex + windowSize, chunks.length);
+          
+          for (let w = chunkIndex; w < windowEnd; w++) {
+            const chunk = chunks[w];
+            const isLastChunk = w === chunks.length - 1;
+
+            // Send chunk metadata
+            const header = {
+              type: "chunk" as const,
+              fileId: fileMeta.id,
+              sequenceNumber: w,
+              isLastChunk,
+            };
+
+            dataChannel.send(JSON.stringify(header));
+            
+            // Small delay to ensure header is processed
+            await new Promise((resolve) => setTimeout(resolve, 1));
+            
+            // Send binary data
+            dataChannel.send(chunk);
+
+            sendingRef.current.bytesTransferred += chunk.byteLength;
+            
+            console.log(`📤 Sent chunk ${w}/${chunks.length - 1} (${chunk.byteLength} bytes)`);
+          }
+
+          chunkIndex = windowEnd;
+
+          // Wait for buffer to drain before next window
           await waitForBuffer(dataChannel);
 
-          // Send chunk metadata
-          const header = {
-            type: "chunk" as const,
-            fileId: fileMeta.id,
-            sequenceNumber,
-            isLastChunk: fileBytesTransferred + chunk.byteLength >= file.size,
-          };
-          
-          dataChannel.send(JSON.stringify(header));
-          
-          // Wait for header to be sent
-          await waitForBuffer(dataChannel);
-          
-          // Longer delay to ensure header is fully processed
-          await new Promise((resolve) => setTimeout(resolve, 5));
-          
-          // Send binary data
-          dataChannel.send(chunk);
-          
-          // Wait for chunk to be sent before next iteration
-          await waitForBuffer(dataChannel);
-          
-          console.log(`📤 Sent chunk ${sequenceNumber} (${chunk.byteLength} bytes)`);
-
-          fileBytesTransferred += chunk.byteLength;
-          sendingRef.current.bytesTransferred += chunk.byteLength;
-          sequenceNumber++;
-
-          // Throttle UI updates to every 100ms
+          // Update progress (throttled)
           const now = Date.now();
           if (now - lastUpdate > 100) {
             lastUpdate = now;
@@ -598,19 +661,19 @@ export function useFileTransfer() {
     } catch (error) {
       console.error(`Send error:`, error);
       setState((prev) => ({
-        ...prev,
+              ...prev,
         isSending: false,
         sendError: error instanceof Error ? error.message : "Unknown error",
         sendingToPeer: null,
       }));
       sendingRef.current.active = false;
       throw error;
-    }
-  }, [waitForBuffer]);
+            }
+  }, [waitForBuffer, getFlowControlState, adaptWindowSize]);
 
   const resetSendState = useCallback(() => {
     setState((prev) => ({
-      ...prev,
+            ...prev,
       isSending: false,
       sendingToPeer: null,
       sendProgress: null,

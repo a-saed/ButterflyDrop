@@ -1,7 +1,7 @@
 import { Upload, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
+import { ButterflyProgress } from "@/components/transfer/ButterflyProgress";
 import type { TransferProgress } from "@/types/transfer";
 
 interface SendProgressPanelProps {
@@ -86,20 +86,10 @@ export function SendProgressPanel({
                 {sendProgress.fileName}
               </p>
             </div>
-            <div className="text-right">
-              <p className="text-sm font-medium">{Math.round(sendProgress.percentage)}%</p>
-              <p className="text-xs text-muted-foreground">{formatBytes(sendProgress.speed)}/s</p>
-            </div>
           </div>
 
-          {/* Progress bar */}
-          <Progress value={sendProgress.percentage} className="h-2" />
-
-          {/* Stats */}
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{formatBytes(sendProgress.bytesTransferred)} / {formatBytes(sendProgress.totalBytes)}</span>
-            <span>{Math.ceil(sendProgress.eta)}s remaining</span>
-          </div>
+          {/* Butterfly progress bar */}
+          <ButterflyProgress progress={sendProgress} />
         </div>
       </Card>
     );

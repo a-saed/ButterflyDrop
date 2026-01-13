@@ -1,7 +1,7 @@
 import { FileDown, Download, X, CheckCircle2, File, Image, Video, Music, FileText, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import { ButterflyProgress } from "@/components/transfer/ButterflyProgress";
 import type { ReceivedFile, IncomingTransfer } from "@/hooks/useFileTransfer";
 import type { TransferProgress } from "@/types/transfer";
 
@@ -71,18 +71,8 @@ export function ReceivedFilesPanel({
             </div>
           </div>
 
-          {/* Current file */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="truncate font-medium">{receiveProgress.fileName}</span>
-              <span className="text-muted-foreground">{Math.round(receiveProgress.percentage)}%</span>
-            </div>
-            <Progress value={receiveProgress.percentage} className="h-2" />
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{formatBytes(receiveProgress.speed)}/s</span>
-              <span>{formatBytes(receiveProgress.bytesTransferred)} / {formatBytes(receiveProgress.totalBytes)}</span>
-            </div>
-          </div>
+          {/* Current file with butterfly progress */}
+          <ButterflyProgress progress={receiveProgress} />
         </div>
       </Card>
     );
@@ -108,34 +98,6 @@ export function ReceivedFilesPanel({
               ⚠️ {filesWithMissingChunks.length} file(s) have no chunk data
             </div>
           )}
-          
-          {/* Debug: Test download mechanism */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full text-xs"
-            onClick={() => {
-              console.log("🧪 Testing download mechanism...");
-              try {
-                const testData = new Uint8Array([72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]); // "Hello World"
-                const blob = new Blob([testData], { type: "text/plain" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "test-download.txt";
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                console.log("🧪 Test download triggered!");
-              } catch (err) {
-                console.error("🧪 Test download failed:", err);
-                alert("Test download failed: " + err);
-              }
-            }}
-          >
-            🧪 Test Download Mechanism
-          </Button>
           
           {/* Header */}
           <div className="flex items-center justify-between">

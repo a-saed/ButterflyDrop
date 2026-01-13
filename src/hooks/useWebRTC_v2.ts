@@ -12,20 +12,29 @@ import type { SignalingMessage } from "@/types/webrtc";
 
 // Signaling server URL - auto-detects production vs development
 const getSignalingUrl = () => {
+  // Always check environment variable first
   if (import.meta.env.VITE_SIGNALING_URL) {
+    console.log(`🔧 Using signaling URL from env: ${import.meta.env.VITE_SIGNALING_URL}`);
     return import.meta.env.VITE_SIGNALING_URL;
   }
 
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const hostname = window.location.hostname;
 
-  if (hostname !== "localhost" && hostname !== "127.0.0.1") {
-    console.log(`🌐 Production mode detected, using ${protocol}//${hostname}`);
-    return `${protocol}//${hostname}`;
+  // Check if hostname is a local IP address (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+  const isLocalIP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(hostname);
+  
+  // If it's localhost or local IP, use same hostname with port 8080
+  if (hostname === "localhost" || hostname === "127.0.0.1" || isLocalIP) {
+    const url = `${protocol}//${hostname}:8080`;
+    console.log(`💻 Local development mode, using ${url}`);
+    return url;
   }
 
-  console.log("💻 Local development mode, using ws://localhost:8080");
-  return "ws://localhost:8080";
+  // Production mode - use same hostname (assumes signaling on same domain)
+  const url = `${protocol}//${hostname}`;
+  console.log(`🌐 Production mode detected, using ${url}`);
+  return url;
 };
 
 const SIGNALING_URL = getSignalingUrl();
@@ -232,7 +241,7 @@ export function useWebRTC() {
       const setupDataChannelHandlers = (channel: RTCDataChannel, role: string) => {
         // CRITICAL: Set binaryType to arraybuffer for proper binary data handling
         channel.binaryType = "arraybuffer";
-        
+
         channel.onopen = () => {
           console.log(`✅ Data channel opened with ${peerId} (${role})`);
           state.isConnected = true;
@@ -313,7 +322,7 @@ export function useWebRTC() {
         
         if (isHealthy) {
           console.log(`   ✅ Already have healthy connection to ${peerId}, skipping`);
-          return;
+        return;
         } else {
           console.log(`   ⚠️ Existing connection to ${peerId} is unhealthy (${pc.connectionState}/${pc.iceConnectionState}), cleaning up...`);
           // Clean up unhealthy connection
@@ -679,11 +688,20 @@ export function useWebRTC() {
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Connect to signaling server
+      console.log(`🔌 Connecting to signaling server: ${SIGNALING_URL}`);
+      console.log(`   Environment variable: ${import.meta.env.VITE_SIGNALING_URL || "not set"}`);
       const signaling = new SignalingClient(SIGNALING_URL);
       signalingRef.current = signaling;
 
-      await signaling.connect();
-      console.log("✅ Connected to signaling server");
+      try {
+        await signaling.connect();
+        console.log("✅ Connected to signaling server");
+      } catch (error) {
+        console.error("❌ Failed to connect to signaling server:", error);
+        console.error(`   URL attempted: ${SIGNALING_URL}`);
+        console.error(`   Make sure the signaling server is running on port 8080`);
+        throw error; // Re-throw to be caught by outer try-catch
+      }
 
       // Join the session
       signaling.send({
@@ -910,15 +928,15 @@ export function useWebRTC() {
     if (currentSessionId !== previousSessionIdRef.current) {
       previousSessionIdRef.current = currentSessionId;
       
-      if (!session) {
+    if (!session) {
         // Use setTimeout to avoid calling setState synchronously in effect
         const timeoutId = setTimeout(() => {
-          cleanup();
+      cleanup();
         }, 0);
         return () => clearTimeout(timeoutId);
-      }
+    }
 
-      initialize();
+    initialize();
       return () => {
         cleanup();
       };

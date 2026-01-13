@@ -97,16 +97,16 @@ function AppContent() {
     if (readyPeers.length > 0) {
       const newPeers = readyPeers.filter((id) => !setupPeersRef.current.has(id));
       if (newPeers.length > 0) {
-        const peerNames = peers
+      const peerNames = peers
           .filter((p) => newPeers.includes(p.id))
-          .map((p) => p.name)
-          .join(", ");
+        .map((p) => p.name)
+        .join(", ");
 
         if (peerNames) {
           toast.success(`Connected with ${peerNames}`, {
-            icon: "🦋",
-            duration: 3000,
-          });
+        icon: "🦋",
+        duration: 3000,
+      });
         }
       }
     } else if (connectionState === "failed") {
@@ -232,11 +232,11 @@ function AppContent() {
   ]);
 
   const handlePeerSelect = useCallback((peerId: string) => {
-    setSelectedPeerId(peerId);
-    const peer = peers.find((p) => p.id === peerId);
+        setSelectedPeerId(peerId);
+          const peer = peers.find((p) => p.id === peerId);
     if (peer && selectedFiles.length > 0) {
       toast.info(`Ready to send to ${peer.name}`, { icon: "📱", duration: 2000 });
-    }
+        }
   }, [selectedFiles, peers]);
 
   // Auto-select first peer when peers are discovered
@@ -355,27 +355,27 @@ function AppContent() {
               {/* File Selection Area - Only show when not sending */}
               {!isSending && !sendComplete && (
                 <>
-                  {selectedFiles.length > 0 ? (
-                    <div className="bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl p-4 shadow-2xl">
-                      <FileList
-                        files={selectedFiles}
-                        onRemove={handleRemoveFile}
-                        onClear={handleClearFiles}
-                      />
+              {selectedFiles.length > 0 ? (
+                <div className="bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl p-4 shadow-2xl">
+                  <FileList
+                    files={selectedFiles}
+                    onRemove={handleRemoveFile}
+                    onClear={handleClearFiles}
+                  />
 
                       {/* Send Button */}
-                      {canSend && (
-                        <div className="flex justify-center mt-4">
-                          <Button
-                            size="lg"
-                            onClick={handleSend}
-                            className="gap-2 min-w-60 h-12 text-base shadow-lg hover:shadow-xl transition-all"
-                          >
-                            <Send className="h-5 w-5" />
+                  {canSend && (
+                    <div className="flex justify-center mt-4">
+                      <Button
+                        size="lg"
+                        onClick={handleSend}
+                        className="gap-2 min-w-60 h-12 text-base shadow-lg hover:shadow-xl transition-all"
+                      >
+                        <Send className="h-5 w-5" />
                             Send {selectedFiles.length} file{selectedFiles.length > 1 ? "s" : ""} to {selectedPeerName}
-                          </Button>
-                        </div>
-                      )}
+                      </Button>
+                    </div>
+                  )}
 
                       {/* Waiting for peer */}
                       {selectedFiles.length > 0 && !canSend && peers.length === 0 && (
@@ -386,29 +386,29 @@ function AppContent() {
 
                       {/* Waiting for connection */}
                       {selectedFiles.length > 0 && !canSend && peers.length > 0 && selectedPeerId && !isPeerReady(selectedPeerId) && (
-                        <div className="text-center mt-4 text-sm text-muted-foreground">
+                      <div className="text-center mt-4 text-sm text-muted-foreground">
                           <p>Establishing connection with {selectedPeerName}...</p>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="bg-background/80 backdrop-blur-sm border border-border/50 rounded-2xl p-6 text-center">
-                      <Upload className="h-10 w-10 text-muted-foreground/50 mx-auto mb-2" />
-                      <p className="text-sm text-muted-foreground mb-3">
+                      </div>
+                    )}
+                </div>
+              ) : (
+                <div className="bg-background/80 backdrop-blur-sm border border-border/50 rounded-2xl p-6 text-center">
+                  <Upload className="h-10 w-10 text-muted-foreground/50 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground mb-3">
                         {peers.length > 0 
                           ? "Drop files anywhere or click to select"
                           : "Share the link to connect, then drop files to send"
                         }
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
                         onClick={() => document.getElementById("file-input")?.click()}
-                      >
-                        <Upload className="h-4 w-4 mr-2" />
-                        Select Files
-                      </Button>
-                    </div>
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Select Files
+                  </Button>
+                </div>
                   )}
                 </>
               )}

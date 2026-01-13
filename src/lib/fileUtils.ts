@@ -1,8 +1,7 @@
 import type { FileMetadata, FolderMetadata } from '@/types/transfer'
 
-// Optimal chunk size for WebRTC DataChannel
-// 16 KB is the sweet spot: fast enough, small enough to avoid drops
-const CHUNK_SIZE = 16384 // 16 KB
+// Base chunk size for WebRTC DataChannel
+const BASE_CHUNK_SIZE = 16384 // 16 KB
 
 /**
  * Generate a UUID - uses crypto.randomUUID if available, otherwise falls back to a custom implementation
@@ -28,10 +27,26 @@ function generateUUID(): string {
 }
 
 /**
- * Get chunk size for file transfer
+ * Get optimal chunk size based on file size
+ * Larger files benefit from larger chunks (less overhead)
  */
-export function getChunkSize(): number {
-  return CHUNK_SIZE
+export function getChunkSize(fileSize?: number): number {
+  if (!fileSize) {
+    return BASE_CHUNK_SIZE;
+  }
+  
+  // Small files (<10MB): use 16 KB
+  if (fileSize < 10 * 1024 * 1024) {
+    return BASE_CHUNK_SIZE;
+  }
+  
+  // Medium files (10-100MB): use 32 KB
+  if (fileSize < 100 * 1024 * 1024) {
+    return 32 * 1024;
+  }
+  
+  // Large files (100MB+): use 64 KB (max safe size)
+  return 64 * 1024;
 }
 
 /**

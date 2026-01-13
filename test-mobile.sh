@@ -50,7 +50,8 @@ echo ""
 echo "🧹 Cleaning up existing processes..."
 pkill -f "node.*dist/index.js" 2>/dev/null || true
 pkill -f "vite" 2>/dev/null || true
-sleep 1
+pkill -f "pnpm.*dev" 2>/dev/null || true
+sleep 2
 
 # Start server in background
 echo "🚀 Starting signaling server..."
@@ -70,15 +71,28 @@ fi
 
 # Start frontend
 echo "🎨 Starting frontend..."
-pnpm dev --host > frontend.log 2>&1 &
+echo "   Using signaling URL: ws://$LOCAL_IP:8080"
+# Use nohup to ensure process stays alive and redirect output properly
+# Clear any cached env vars by explicitly setting it
+export VITE_SIGNALING_URL="ws://$LOCAL_IP:8080"
+nohup pnpm dev > frontend.log 2>&1 &
 FRONTEND_PID=$!
-sleep 3
+sleep 5
 
-# Check if frontend started
-if ps -p $FRONTEND_PID > /dev/null; then
+# Check if frontend started (check for vite process)
+if pgrep -f "vite" > /dev/null; then
     echo "✅ Frontend started (PID: $FRONTEND_PID)"
+    echo "   Checking if Vite is listening..."
+    sleep 2
+    if curl -s http://localhost:5173 > /dev/null 2>&1; then
+        echo "   ✅ Vite is responding on localhost:5173"
+    else
+        echo "   ⚠️  Vite may still be starting, wait a few seconds..."
+    fi
 else
     echo "❌ Frontend failed to start. Check frontend.log for errors"
+    echo "   Last 10 lines of frontend.log:"
+    tail -10 frontend.log
     kill $SERVER_PID 2>/dev/null || true
     exit 1
 fi
@@ -94,8 +108,9 @@ echo ""
 echo "💻 Open on your laptop:"
 echo "   http://localhost:5173"
 echo ""
-echo "🔍 Test signaling server:"
-echo "   curl http://$LOCAL_IP:8080/health"
+echo "🔍 Test servers:"
+echo "   Frontend: curl http://localhost:5173"
+echo "   Signaling: curl http://$LOCAL_IP:8080/health"
 echo ""
 echo "📊 View logs:"
 echo "   tail -f server.log     (server logs)"
@@ -105,7 +120,11 @@ echo "🛑 To stop servers:"
 echo "   kill $SERVER_PID $FRONTEND_PID"
 echo "   OR press Ctrl+C and run: pkill -f 'node.*dist/index.js' && pkill -f vite"
 echo ""
-echo "⚠️  Make sure your mobile is on the same WiFi network!"
+echo "⚠️  Troubleshooting:"
+echo "   - Make sure your mobile is on the same WiFi network"
+echo "   - Check firewall: sudo ufw allow 5173/tcp"
+echo "   - Check firewall: sudo ufw allow 8080/tcp"
+echo "   - If still not working, check frontend.log for errors"
 echo ""
 
 # Wait for user
