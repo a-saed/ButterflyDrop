@@ -34,13 +34,20 @@ This is the **recommended** combination for best performance and ease of use.
    - Select the repository
 
 4. **Configure Service**
+   
+   **Option A: Using render.yaml (Recommended)**
+   - The `render.yaml` file in the root directory is automatically detected
+   - Just connect your GitHub repo and Render will use the configuration
+   - No manual configuration needed!
+   
+   **Option B: Manual Configuration**
    - **Name**: `butterfly-drop-signaling`
-   - **Root Directory**: `server`
+   - **Root Directory**: `server` ⚠️ **IMPORTANT**: Must be set to `server`
    - **Environment**: `Node`
    - **Build Command**: `pnpm install --no-frozen-lockfile && pnpm build`
-   - **Note**: If you get lockfile errors, ensure `server/pnpm-lock.yaml` is committed to git
    - **Start Command**: `pnpm start`
    - **Plan**: Free (or paid for better performance)
+   - **Note**: If you get lockfile errors, ensure `server/pnpm-lock.yaml` is committed to git
 
 5. **Set Environment Variables**
    - `NODE_ENV` = `production`

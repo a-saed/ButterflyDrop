@@ -4,9 +4,9 @@ services:
     env: node
     region: oregon
     plan: free
+    rootDir: server
     buildCommand: pnpm install --no-frozen-lockfile && pnpm build
     startCommand: pnpm start
-    rootDir: server
     envVars:
       - key: NODE_ENV
         value: production
@@ -16,3 +16,4 @@ services:
         sync: false
     healthCheckPath: /
     autoDeploy: true
+
