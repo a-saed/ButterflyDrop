@@ -37,7 +37,8 @@ This is the **recommended** combination for best performance and ease of use.
    - **Name**: `butterfly-drop-signaling`
    - **Root Directory**: `server`
    - **Environment**: `Node`
-   - **Build Command**: `pnpm install && pnpm build`
+   - **Build Command**: `pnpm install --no-frozen-lockfile && pnpm build`
+   - **Note**: If you get lockfile errors, ensure `server/pnpm-lock.yaml` is committed to git
    - **Start Command**: `pnpm start`
    - **Plan**: Free (or paid for better performance)
 

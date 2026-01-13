@@ -4,7 +4,7 @@ services:
     env: node
     region: oregon
     plan: free
-    buildCommand: pnpm install && pnpm build
+    buildCommand: pnpm install --no-frozen-lockfile && pnpm build
     startCommand: pnpm start
     envVars:
       - key: NODE_ENV

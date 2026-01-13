@@ -1,5 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
-import { createServer } from "http";
+import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import type {
   SignalingMessage,
   Session,
@@ -493,7 +493,7 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
 }
 
 // Create HTTP server for health checks
-const httpServer = createServer((req, res) => {
+const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
   // Health check endpoint
   if (req.url === "/" || req.url === "/health") {
     res.writeHead(200, {
@@ -538,7 +538,7 @@ httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Listening on all network interfaces (0.0.0.0)`);
 });
 
-wss.on("connection", (ws: WebSocket, req) => {
+wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   const clientIp = req.socket.remoteAddress;
   console.log(`New WebSocket connection from ${clientIp}`);
 
@@ -546,7 +546,7 @@ wss.on("connection", (ws: WebSocket, req) => {
     try {
       const message: SignalingMessage = JSON.parse(data.toString());
       handleMessage(ws, message);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Failed to parse message:", error);
       ws.send(
         JSON.stringify({
@@ -602,7 +602,7 @@ wss.on("connection", (ws: WebSocket, req) => {
     }
   });
 
-  ws.on("error", (error) => {
+  ws.on("error", (error: Error) => {
     console.error("WebSocket error:", error);
   });
 });
@@ -641,12 +641,12 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 // Handle uncaught errors
-process.on("uncaughtException", (error) => {
+process.on("uncaughtException", (error: Error) => {
   console.error("❌ Uncaught Exception:", error);
   shutdown();
 });
 
-process.on("unhandledRejection", (reason, promise) => {
+process.on("unhandledRejection", (reason: unknown, promise: Promise<unknown>) => {
   console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
 });
 
