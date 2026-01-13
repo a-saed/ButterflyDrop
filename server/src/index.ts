@@ -533,7 +533,6 @@ httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`🔌 Port: ${PORT}`);
   console.log(`📊 Active sessions: ${sessions.size}`);
   console.log(`🏥 Health check: http://localhost:${PORT}/health`);
-  console.log(`📱 LAN access: http://192.168.0.136:${PORT}/health`);
   console.log(`✅ WebSocket server ready for connections`);
   console.log(`🌐 Listening on all network interfaces (0.0.0.0)`);
 });

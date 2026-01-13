@@ -50,14 +50,17 @@ export function createShareableUrl(sessionId: string): string {
   const port = window.location.port;
   const protocol = window.location.protocol;
 
-  // For localhost, use 192.168.0.136 (your LAN IP) for QR codes
-  // This allows mobile devices to access the app
+  // For localhost, use environment variable for LAN IP if set
+  // This allows mobile devices to access the app when testing locally
   let accessibleHost = hostname;
   if (hostname === "localhost" || hostname === "127.0.0.1") {
-    // Use environment variable if set, otherwise use detected LAN IP
-    const lanIp = import.meta.env.VITE_LAN_IP || "192.168.0.136";
-    accessibleHost = lanIp;
-    console.log(`[sessionUtils] 📱 Converting localhost to LAN IP: ${lanIp}`);
+    // Use environment variable if set, otherwise keep localhost
+    // Users should set VITE_LAN_IP in .env.local for local testing
+    const lanIp = import.meta.env.VITE_LAN_IP;
+    if (lanIp) {
+      accessibleHost = lanIp;
+      console.log(`[sessionUtils] 📱 Converting localhost to LAN IP: ${lanIp}`);
+    }
   }
 
   const baseUrl = `${protocol}//${accessibleHost}${port ? `:${port}` : ""}${window.location.pathname}`;
