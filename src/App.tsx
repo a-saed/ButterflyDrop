@@ -14,6 +14,7 @@ import { FileList } from "@/components/transfer/FileList";
 import { SendProgressPanel } from "@/components/transfer/SendProgressPanel";
 import { ReceivedFilesPanel } from "@/components/transfer/ReceivedFilesPanel";
 import { ShareLink } from "@/components/connection/ShareLink";
+import { QRScanner } from "@/components/connection/QRScanner";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { ConnectionStatus } from "@/components/connection/ConnectionStatus";
 import { createShareableUrl } from "@/lib/sessionUtils";
@@ -25,6 +26,7 @@ import { useDropzone } from "react-dropzone";
 
 function AppContent() {
   const session = useSession();
+  const { joinSession } = session;
   const { peers, isScanning } = usePeerDiscovery();
   const { connectionState } = useConnection();
   const { getDataChannelForPeer, getQueuedMessagesForPeer, isPeerReady, readyPeers } = useWebRTC();
@@ -67,6 +69,23 @@ function AppContent() {
   const shareableUrl = session.session
     ? createShareableUrl(session.session.id)
     : "";
+
+  // Handle QR code scan success
+  const handleQRScanSuccess = useCallback((sessionId: string) => {
+    console.log(`📱 QR Code scanned, joining session: ${sessionId}`);
+    
+    // Join the session
+    joinSession(sessionId);
+    
+    // Update URL to reflect the new session
+    const newHash = `#session=${sessionId}`;
+    window.history.replaceState(null, "", newHash);
+    
+    toast.success("Session joined!", {
+      description: "Connecting to peers...",
+      icon: "🦋",
+    });
+  }, [joinSession]);
 
   // Setup file receiver for all ready peers
   // This is CRITICAL - must set up onmessage handler before files arrive
@@ -303,6 +322,7 @@ function AppContent() {
                 <ShareLink url={shareableUrl} />
               </div>
             )}
+            <QRScanner onScanSuccess={handleQRScanSuccess} />
             <ConnectionStatus
               peerCount={readyPeers.length}
               sessionId={session.session?.id || null}
@@ -397,7 +417,7 @@ function AppContent() {
                   <p className="text-sm text-muted-foreground mb-3">
                         {peers.length > 0 
                           ? "Drop files anywhere or click to select"
-                          : "Share the link to connect, then drop files to send"
+                          : "Scan a QR code or share the link to connect, then drop files to send"
                         }
                   </p>
                   <Button

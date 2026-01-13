@@ -94,6 +94,7 @@ export function ShareLink({ url }: ShareLinkProps) {
             variant="outline"
             size="icon"
             className="shrink-0 transition-butterfly hover-lift"
+            title="Show QR code to share"
           >
             <QrCode className="h-4 w-4" />
           </Button>
