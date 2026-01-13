@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Copy, Check, Share2, QrCode } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import QRCode from "react-qr-code";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -41,13 +42,61 @@ export function ShareLink({ url }: ShareLinkProps) {
   }, [url]);
 
   const handleCopy = async () => {
+    // Try modern clipboard API first
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(url);
+        setCopied(true);
+        toast.success("Link copied!", {
+          description: url,
+          icon: "📋",
+          duration: 3000,
+        });
+        setTimeout(() => setCopied(false), 2000);
+        console.log("📋 [ShareLink] URL copied to clipboard:", url);
+        return;
+      } catch (error) {
+        console.warn("❌ [ShareLink] Clipboard API failed, trying fallback:", error);
+      }
+    }
+
+    // Fallback for mobile browsers
     try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-      console.log("📋 [ShareLink] URL copied to clipboard:", url);
+      // Create a temporary textarea element
+      const textArea = document.createElement("textarea");
+      textArea.value = url;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-999999px";
+      textArea.style.top = "-999999px";
+      textArea.style.opacity = "0";
+      textArea.setAttribute("readonly", "");
+      document.body.appendChild(textArea);
+
+      // Select and copy
+      textArea.select();
+      textArea.setSelectionRange(0, url.length);
+
+      const successful = document.execCommand("copy");
+      document.body.removeChild(textArea);
+
+      if (successful) {
+        setCopied(true);
+        toast.success("Link copied!", {
+          description: url,
+          icon: "📋",
+          duration: 3000,
+        });
+        setTimeout(() => setCopied(false), 2000);
+        console.log("📋 [ShareLink] URL copied using fallback method");
+      } else {
+        throw new Error("execCommand failed");
+      }
     } catch (error) {
-      console.error("❌ [ShareLink] Failed to copy URL:", error);
+      console.error("❌ [ShareLink] All copy methods failed:", error);
+      toast.error("Failed to copy link", {
+        description: "Please use the share button or manually copy the URL",
+        duration: 4000,
+      });
     }
   };
 
