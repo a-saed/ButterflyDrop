@@ -19,7 +19,7 @@ export function ConnectionStatus({ peerCount, sessionId }: ConnectionStatusProps
     return (
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-9 w-9">
+          <Button variant="ghost" size="icon" className="h-9 w-9 touch-manipulation">
             <WifiOff className="h-4 w-4 text-muted-foreground" />
           </Button>
         </PopoverTrigger>
@@ -38,7 +38,7 @@ export function ConnectionStatus({ peerCount, sessionId }: ConnectionStatusProps
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-9 w-9 relative">
+        <Button variant="ghost" size="icon" className="h-9 w-9 relative touch-manipulation">
           <Wifi className="h-4 w-4 text-green-500" />
           {peerCount > 0 && (
             <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-green-500 text-[10px] font-medium text-white flex items-center justify-center">

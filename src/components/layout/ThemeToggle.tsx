@@ -11,7 +11,7 @@ export function ThemeToggle() {
       variant="ghost"
       size="icon"
       onClick={toggleTheme}
-      className="relative overflow-hidden group"
+      className="relative overflow-hidden group h-9 w-9 touch-manipulation"
       aria-label="Toggle theme"
     >
       <Sun

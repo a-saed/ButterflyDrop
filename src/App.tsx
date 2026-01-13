@@ -305,20 +305,20 @@ function AppContent() {
       {/* Main Content */}
       <div className="relative min-h-screen flex flex-col" style={{ zIndex: 10 }}>
         {/* Header */}
-        <header className="flex items-center justify-between p-6 border-b border-border/50 backdrop-blur-sm bg-background/50">
-          <div className="flex items-center gap-3">
+        <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 p-4 sm:p-6 border-b border-border/50 backdrop-blur-sm bg-background/50">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <ButterflyLogo />
-            <div>
-              <h1 className="text-xl font-semibold">Butterfly Drop</h1>
-              <p className="text-base sm:text-lg font-medium text-muted-foreground">
+            <div className="min-w-0">
+              <h1 className="text-lg sm:text-xl font-semibold truncate">Butterfly Drop</h1>
+              <p className="text-sm sm:text-base md:text-lg font-medium text-muted-foreground">
                 Let your files fly
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-3 lg:gap-4 w-full sm:w-auto justify-end flex-wrap">
             {shareableUrl && (
-              <div className="hidden md:block max-w-md">
+              <div className="flex-1 sm:flex-initial min-w-0">
                 <ShareLink url={shareableUrl} />
               </div>
             )}
@@ -330,13 +330,6 @@ function AppContent() {
             <ThemeToggle />
           </div>
         </header>
-
-        {/* Mobile Share Link */}
-        {shareableUrl && (
-          <div className="px-6 py-4 md:hidden border-b border-border/50">
-            <ShareLink url={shareableUrl} />
-          </div>
-        )}
 
         {/* Main Content Area */}
         <main className="flex-1 relative">

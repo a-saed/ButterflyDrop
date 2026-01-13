@@ -280,8 +280,8 @@ export function QRScanner({
         variant="outline"
         size="icon"
         onClick={() => setIsOpen(true)}
-        className="shrink-0 transition-butterfly hover-lift"
-        title="Scan QR code to join session"
+        className="shrink-0 transition-butterfly hover-lift h-9 w-9 sm:h-9 sm:w-9 touch-manipulation"
+        title="Scan QR code - open camera to scan a session QR code"
       >
         <ScanLine className="h-4 w-4" />
       </Button>

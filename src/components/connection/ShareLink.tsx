@@ -17,6 +17,16 @@ interface ShareLinkProps {
 
 export function ShareLink({ url }: ShareLinkProps) {
   const [copied, setCopied] = useState(false);
+  const [qrSize, setQrSize] = useState(256);
+
+  useEffect(() => {
+    const updateQrSize = () => {
+      setQrSize(window.innerWidth < 640 ? 200 : 256);
+    };
+    updateQrSize();
+    window.addEventListener('resize', updateQrSize);
+    return () => window.removeEventListener('resize', updateQrSize);
+  }, []);
 
   // Log QR code URL whenever it changes
   useEffect(() => {
@@ -59,16 +69,13 @@ export function ShareLink({ url }: ShareLinkProps) {
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 px-3 py-2 bg-muted rounded-lg border text-sm truncate">
-        {url}
-      </div>
-
+    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
       <Button
         variant="outline"
         size="icon"
         onClick={handleCopy}
-        className="shrink-0 transition-butterfly hover-lift"
+        className="shrink-0 transition-butterfly hover-lift h-9 w-9 sm:h-9 sm:w-9 touch-manipulation"
+        title={copied ? "Copied to clipboard!" : "Copy session URL to clipboard"}
       >
         {copied ? (
           <Check className="h-4 w-4 text-green-500 animate-morph-success" />
@@ -82,7 +89,8 @@ export function ShareLink({ url }: ShareLinkProps) {
           variant="outline"
           size="icon"
           onClick={handleShare}
-          className="shrink-0 transition-butterfly hover-lift"
+          className="shrink-0 transition-butterfly hover-lift h-9 w-9 sm:h-9 sm:w-9 touch-manipulation"
+          title="Share session link via native share dialog"
         >
           <Share2 className="h-4 w-4" />
         </Button>
@@ -93,13 +101,13 @@ export function ShareLink({ url }: ShareLinkProps) {
           <Button
             variant="outline"
             size="icon"
-            className="shrink-0 transition-butterfly hover-lift"
-            title="Show QR code to share"
+            className="shrink-0 transition-butterfly hover-lift h-9 w-9 sm:h-9 sm:w-9 touch-manipulation"
+            title="Show QR code - scan with another device to join"
           >
             <QrCode className="h-4 w-4" />
           </Button>
         </DialogTrigger>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md mx-auto">
           <DialogHeader>
             <DialogTitle>Share with QR Code</DialogTitle>
             <DialogDescription>
@@ -107,8 +115,8 @@ export function ShareLink({ url }: ShareLinkProps) {
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col items-center gap-4 py-4">
-            <div className="p-4 bg-white rounded-lg">
-              <QRCode value={url} size={256} />
+            <div className="p-3 sm:p-4 bg-white rounded-lg w-full max-w-[280px] sm:max-w-none flex items-center justify-center">
+              <QRCode value={url} size={qrSize} />
             </div>
             <div className="text-sm text-muted-foreground text-center space-y-2">
               <p className="font-medium">Session URL:</p>
