@@ -65,6 +65,9 @@ function AppContent() {
   
   // Track which peers have receivers set up
   const setupPeersRef = useRef<Set<string>>(new Set());
+  // Track if we've already shown connection failed toast
+  const connectionFailedToastShownRef = useRef(false);
+  const previousConnectionStateRef = useRef<string | null>(null);
 
   const shareableUrl = session.session
     ? createShareableUrl(session.session.id)
@@ -113,26 +116,38 @@ function AppContent() {
 
   // Show connection status when peers become ready
   useEffect(() => {
+    const previousState = previousConnectionStateRef.current;
+    previousConnectionStateRef.current = connectionState;
+
     if (readyPeers.length > 0) {
       const newPeers = readyPeers.filter((id) => !setupPeersRef.current.has(id));
       if (newPeers.length > 0) {
-      const peerNames = peers
+        const peerNames = peers
           .filter((p) => newPeers.includes(p.id))
-        .map((p) => p.name)
-        .join(", ");
+          .map((p) => p.name)
+          .join(", ");
 
         if (peerNames) {
           toast.success(`Connected with ${peerNames}`, {
-        icon: "🦋",
-        duration: 3000,
-      });
+            icon: "🦋",
+            duration: 3000,
+          });
         }
       }
-    } else if (connectionState === "failed") {
-      toast.error("Connection failed", {
-        description: "Check your network and try refreshing",
-        duration: 4000,
-      });
+      // Reset failed toast flag when connection succeeds
+      connectionFailedToastShownRef.current = false;
+    } else if (connectionState === "failed" && previousState !== "failed") {
+      // Only show toast when transitioning TO failed state, not repeatedly
+      if (!connectionFailedToastShownRef.current) {
+        connectionFailedToastShownRef.current = true;
+        toast.error("Connection failed", {
+          description: "Check your network and try refreshing",
+          duration: 4000,
+        });
+      }
+    } else if (connectionState !== "failed") {
+      // Reset flag when connection state changes away from failed
+      connectionFailedToastShownRef.current = false;
     }
   }, [connectionState, readyPeers, peers]);
 
