@@ -68,6 +68,8 @@ function AppContent() {
   // Track if we've already shown connection failed toast
   const connectionFailedToastShownRef = useRef(false);
   const previousConnectionStateRef = useRef<string | null>(null);
+  // Track which sessions we've already joined (to prevent duplicate toasts)
+  const joinedSessionsRef = useRef<Set<string>>(new Set());
 
   const shareableUrl = session.session
     ? createShareableUrl(session.session.id)
@@ -75,7 +77,22 @@ function AppContent() {
 
   // Handle QR code scan success
   const handleQRScanSuccess = useCallback((sessionId: string) => {
+    // Prevent duplicate joins - check if already in this session
+    if (session.session?.id === sessionId) {
+      console.log(`⚠️ Already in session ${sessionId}, skipping`);
+      return;
+    }
+
+    // Prevent duplicate joins from QR scanner
+    if (joinedSessionsRef.current.has(sessionId)) {
+      console.log(`⚠️ Already joined session ${sessionId}, skipping`);
+      return;
+    }
+
     console.log(`📱 QR Code scanned, joining session: ${sessionId}`);
+    
+    // Mark as joined before calling joinSession
+    joinedSessionsRef.current.add(sessionId);
     
     // Join the session
     joinSession(sessionId);
@@ -88,7 +105,7 @@ function AppContent() {
       description: "Connecting to peers...",
       icon: "🦋",
     });
-  }, [joinSession]);
+  }, [joinSession, session.session]);
 
   // Setup file receiver for all ready peers
   // This is CRITICAL - must set up onmessage handler before files arrive

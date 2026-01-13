@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useSession as useSessionContext } from "@/contexts/SessionContext";
 import { getSessionIdFromUrl, createShareableUrl } from "@/lib/sessionUtils";
 
@@ -10,8 +10,16 @@ console.log("🔄 [useSession] Hook initialized");
 export function useSession() {
   const sessionContext = useSessionContext();
 
+  // Track if we've already processed the initial URL check
+  const hasProcessedInitialUrlRef = useRef(false);
+
   // Check for session ID in URL on mount
   useEffect(() => {
+    // Only process once on mount
+    if (hasProcessedInitialUrlRef.current) {
+      return;
+    }
+
     console.log("🔄 [useSession] Effect triggered - checking URL for session");
     console.log(`  - Current URL: ${window.location.href}`);
     console.log(`  - Current hash: ${window.location.hash}`);
@@ -26,10 +34,12 @@ export function useSession() {
       console.log(
         `✅ [useSession] Joining existing session from URL: ${sessionId}`,
       );
+      hasProcessedInitialUrlRef.current = true;
       sessionContext.joinSession(sessionId);
     } else if (!sessionId && !sessionContext.session) {
       // Create new session if none exists
       console.log("🆕 [useSession] No session in URL, creating new session");
+      hasProcessedInitialUrlRef.current = true;
       const newSession = sessionContext.createSession();
       // Update URL with session ID (only update hash, not full URL)
       const newHash = `#session=${newSession.id}`;
@@ -40,10 +50,12 @@ export function useSession() {
       );
     } else if (sessionId && sessionContext.session) {
       console.log(`ℹ️ [useSession] Session already exists, skipping join`);
+      hasProcessedInitialUrlRef.current = true;
     } else {
       console.log(
         `ℹ️ [useSession] No session ID and session exists, nothing to do`,
       );
+      hasProcessedInitialUrlRef.current = true;
     }
   }, [sessionContext]);
 
