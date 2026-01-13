@@ -1,17 +1,50 @@
-# Butterfly Drop
+# 🦋 Butterfly Drop
 
 P2P file sharing via WebRTC DataChannels. No cloud, no accounts.
 
-## How It Works
+## Architecture
 
 ```
-Device A ──[WebRTC P2P]── Device B
-    │                          │
-    └──[Signaling Server]─────┘
-    (SDP/ICE only, no file data)
+┌─────────────┐                    ┌─────────────┐
+│  Device A   │                    │  Device B   │
+│  (Sender)   │                    │ (Receiver)  │
+└──────┬──────┘                    └──────┬──────┘
+       │                                  │
+       │ 1. WS: session-create            │
+       ├──────────────────────────────────┤
+       │                                  │
+       │ 2. WS: session-join              │
+       │◄─────────────────────────────────┤
+       │                                  │
+       │ 3. WS: SDP offer/answer          │
+       │◄─────────────────────────────────┤
+       │ 4. WS: ICE candidates            │
+       │◄─────────────────────────────────┤
+       │                                  │
+       │ 5. WebRTC P2P established        │
+       │◄═════════════════════════════════►│
+       │                                  │
+       │ 6. DataChannel: file chunks      │
+       │◄═════════════════════════════════►│
+       │   (DTLS encrypted, SCTP)         │
+       │                                  │
+┌──────┴──────┐                    ┌──────┴──────┐
+│ Signaling   │                    │ Signaling   │
+│   Server    │                    │   Server    │
+│  (WebSocket)│                    │  (WebSocket)│
+└─────────────┘                    └─────────────┘
+     │                                    │
+     └────────── SDP/ICE only ───────────┘
+     (no file data, ephemeral sessions)
 ```
 
-Signaling server handles connection setup (SDP/ICE exchange). File data flows directly peer-to-peer via WebRTC DataChannels. Zero file data touches the server.
+**Flow:**
+1. Sender creates session → Signaling server generates session ID
+2. Receiver joins via session ID → Signaling server links peers
+3. SDP offer/answer exchange → WebRTC negotiation
+4. ICE candidates exchange → NAT traversal
+5. P2P connection established → Direct WebRTC DataChannel
+6. File chunks stream → DTLS encrypted, ordered delivery
 
 ## Stack
 
