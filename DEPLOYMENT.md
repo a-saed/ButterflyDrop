@@ -40,14 +40,17 @@ This is the **recommended** combination for best performance and ease of use.
    - Just connect your GitHub repo and Render will use the configuration
    - No manual configuration needed!
    
-   **Option B: Manual Configuration**
+   **Option B: Manual Configuration (if render.yaml doesn't work)**
    - **Name**: `butterfly-drop-signaling`
    - **Root Directory**: `server` ⚠️ **IMPORTANT**: Must be set to `server`
    - **Environment**: `Node`
-   - **Build Command**: `pnpm install --no-frozen-lockfile && pnpm build`
+   - **Build Command**: `pnpm install --no-frozen-lockfile --include=dev && pnpm build`
    - **Start Command**: `pnpm start`
    - **Plan**: Free (or paid for better performance)
-   - **Note**: If you get lockfile errors, ensure `server/pnpm-lock.yaml` is committed to git
+   - **Note**: 
+     - If you get lockfile errors, ensure `server/pnpm-lock.yaml` is committed to git
+     - The `--include=dev` flag ensures TypeScript is installed for the build
+     - If Render still uses default build command, manually override it in the dashboard
 
 5. **Set Environment Variables**
    - `NODE_ENV` = `production`
