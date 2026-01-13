@@ -291,7 +291,7 @@ function AppContent() {
             <ButterflyLogo />
             <div>
               <h1 className="text-xl font-semibold">Butterfly Drop</h1>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-base sm:text-lg font-medium text-muted-foreground">
                 Let your files fly
               </p>
             </div>

@@ -694,8 +694,8 @@ export function useWebRTC() {
       signalingRef.current = signaling;
 
       try {
-        await signaling.connect();
-        console.log("✅ Connected to signaling server");
+      await signaling.connect();
+      console.log("✅ Connected to signaling server");
       } catch (error) {
         console.error("❌ Failed to connect to signaling server:", error);
         console.error(`   URL attempted: ${SIGNALING_URL}`);

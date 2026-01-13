@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="wingGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa" />
+      <stop offset="50%" stop-color="#93c5fd" />
+      <stop offset="100%" stop-color="#bfdbfe" />
+    </linearGradient>
+    <linearGradient id="bodyGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#2563eb" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Transform to center and scale up butterfly (1.6x scale - ensures wings fit) -->
+  <g transform="translate(32, 38) scale(1.6)">
+    <!-- Body - thicker for visibility at small sizes -->
+    <ellipse cx="0" cy="0" rx="3" ry="12" fill="#3b82f6"/>
+    
+    <!-- Head - bigger and more visible -->
+    <circle cx="0" cy="-12" r="5" fill="#3b82f6"/>
+    
+    <!-- Left wing - slightly smaller to fit horizontally -->
+    <ellipse cx="-11" cy="-6" rx="12" ry="9" fill="#60a5fa" transform="rotate(-8 -11 -6)"/>
+    <ellipse cx="-13" cy="-6" rx="6" ry="5" fill="#93c5fd" transform="rotate(-8 -13 -6)"/>
+    <circle cx="-14" cy="-7" r="2" fill="rgba(255, 255, 255, 0.8)"/>
+    
+    <!-- Right wing - slightly smaller to fit horizontally -->
+    <ellipse cx="11" cy="-6" rx="12" ry="9" fill="#60a5fa" transform="rotate(8 11 -6)"/>
+    <ellipse cx="13" cy="-6" rx="6" ry="5" fill="#93c5fd" transform="rotate(8 13 -6)"/>
+    <circle cx="14" cy="-7" r="2" fill="rgba(255, 255, 255, 0.8)"/>
+    
+    <!-- Antennae - thicker and more visible, shortened to fit -->
+    <path d="M -2.5 -14 Q -4 -16.5 -5 -18" stroke="#3b82f6" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <path d="M 2.5 -14 Q 4 -16.5 5 -18" stroke="#3b82f6" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <circle cx="-5" cy="-18" r="2" fill="#3b82f6"/>
+    <circle cx="5" cy="-18" r="2" fill="#3b82f6"/>
+  </g>
+</svg>
+
