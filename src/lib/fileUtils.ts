@@ -192,7 +192,7 @@ export function sanitizeFileName(fileName: string): string {
  */
 export async function* readFileInChunks(
   file: File,
-  chunkSize: number = CHUNK_SIZE
+  chunkSize: number = BASE_CHUNK_SIZE
 ): AsyncGenerator<ArrayBuffer, void, unknown> {
   let offset = 0
 

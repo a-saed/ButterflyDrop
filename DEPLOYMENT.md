@@ -44,7 +44,7 @@ This is the **recommended** combination for best performance and ease of use.
    - **Name**: `butterfly-drop-signaling`
    - **Root Directory**: `server` ⚠️ **IMPORTANT**: Must be set to `server`
    - **Environment**: `Node`
-   - **Build Command**: `pnpm install --no-frozen-lockfile --include=dev && pnpm build`
+   - **Build Command**: `pnpm install --no-lockfile --include=dev && pnpm build`
    - **Start Command**: `pnpm start`
    - **Plan**: Free (or paid for better performance)
    - **Note**: 

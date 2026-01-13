@@ -11,7 +11,6 @@ interface SendProgressPanelProps {
   sendError: string | null;
   peerName: string;
   onReset: () => void;
-  formatBytes: (bytes: number) => string;
 }
 
 export function SendProgressPanel({
@@ -21,7 +20,6 @@ export function SendProgressPanel({
   sendError,
   peerName,
   onReset,
-  formatBytes,
 }: SendProgressPanelProps) {
   // Don't show if nothing to show
   if (!isSending && !sendComplete && !sendError) {

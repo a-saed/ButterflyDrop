@@ -362,7 +362,6 @@ function AppContent() {
                 sendError={sendError}
                 peerName={sendingToPeer ? peers.find((p) => p.id === sendingToPeer)?.name || "peer" : selectedPeerName}
                 onReset={resetSendState}
-                formatBytes={formatBytes}
               />
 
               {/* File Selection Area - Only show when not sending */}

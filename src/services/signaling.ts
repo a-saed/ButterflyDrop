@@ -103,7 +103,7 @@ export class SignalingClient {
         try {
           const result = handler(data);
           // If handler returns a promise, wait for it
-          if (result && typeof result === "object" && "then" in result) {
+          if (result !== undefined && result !== null && typeof result === "object" && "then" in result) {
             await result;
           }
         } catch (error) {

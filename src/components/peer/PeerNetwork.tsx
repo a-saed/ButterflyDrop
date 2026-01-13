@@ -1,5 +1,5 @@
 import { PeerAvatar } from "./PeerAvatar";
-import { Wifi, Loader2 } from "lucide-react";
+import { Wifi } from "lucide-react";
 import { useMemo } from "react";
 
 interface Peer {
