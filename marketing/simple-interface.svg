@@ -1,0 +1,124 @@
+<svg width="2200" height="1100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Gradient for background -->
+    <linearGradient id="bgGrad4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#faf5ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f3e8ff;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Wing gradient -->
+    <linearGradient id="wingGrad4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#60a5fa;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#93c5fd;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Body gradient -->
+    <linearGradient id="bodyGrad4" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e40af;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Button gradient -->
+    <linearGradient id="buttonGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2563eb;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="2200" height="1100" fill="url(#bgGrad4)"/>
+  
+  <!-- Mockup device/browser window -->
+  <g transform="translate(1100, 550)">
+    <!-- Browser window -->
+    <rect x="-500" y="-350" width="1000" height="700" rx="16" fill="#ffffff" stroke="#e2e8f0" stroke-width="4"/>
+    
+    <!-- Browser bar -->
+    <rect x="-500" y="-350" width="1000" height="60" rx="16" fill="#f1f5f9"/>
+    <circle cx="-450" cy="-320" r="8" fill="#ef4444"/>
+    <circle cx="-420" cy="-320" r="8" fill="#f59e0b"/>
+    <circle cx="-390" cy="-320" r="8" fill="#10b981"/>
+    
+    <!-- URL bar -->
+    <rect x="-350" y="-340" width="800" height="40" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+    <text x="-340" y="-315" font-family="system-ui, -apple-system, sans-serif" font-size="20" fill="#64748b">
+      butterfly-drop.app
+    </text>
+    
+    <!-- App content area -->
+    <rect x="-480" y="-270" width="960" height="600" rx="12" fill="#ffffff"/>
+    
+    <!-- Logo area -->
+    <g transform="translate(0, -200)">
+      <!-- Butterfly logo -->
+      <ellipse cx="0" cy="0" rx="6" ry="50" fill="url(#bodyGrad4)"/>
+      <circle cx="0" cy="-50" r="10" fill="url(#bodyGrad4)"/>
+      <ellipse cx="-40" cy="-15" rx="55" ry="40" fill="url(#wingGrad4)" transform="rotate(-15 -40 -15)"/>
+      <ellipse cx="40" cy="-15" rx="55" ry="40" fill="url(#wingGrad4)" transform="rotate(15 40 -15)"/>
+      <ellipse cx="-50" cy="-15" rx="28" ry="22" fill="#93c5fd" transform="rotate(-15 -50 -15)"/>
+      <ellipse cx="50" cy="-15" rx="28" ry="22" fill="#93c5fd" transform="rotate(15 50 -15)"/>
+      <circle cx="-55" cy="-20" r="6" fill="rgba(255,255,255,0.7)"/>
+      <circle cx="55" cy="-20" r="6" fill="rgba(255,255,255,0.7)"/>
+      
+      <!-- App title -->
+      <text x="0" y="80" font-family="system-ui, -apple-system, sans-serif" font-size="48" font-weight="700" fill="#1e40af" text-anchor="middle">
+        Butterfly Drop
+      </text>
+    </g>
+    
+    <!-- Drop zone -->
+    <g transform="translate(0, 50)">
+      <rect x="-300" y="-80" width="600" height="200" rx="16" fill="#f8fafc" stroke="#3b82f6" stroke-width="3" stroke-dasharray="10,5"/>
+      
+      <!-- Upload icon -->
+      <g transform="translate(0, -20)">
+        <circle cx="0" cy="0" r="40" fill="#e0f2fe" stroke="#3b82f6" stroke-width="3"/>
+        <path d="M 0 -20 L 0 20 M -20 0 L 20 0" stroke="#3b82f6" stroke-width="4" stroke-linecap="round"/>
+      </g>
+      
+      <!-- Text -->
+      <text x="0" y="50" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="600" fill="#3b82f6" text-anchor="middle">
+        Drop files here or click to select
+      </text>
+      
+      <text x="0" y="85" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="400" fill="#64748b" text-anchor="middle">
+        Share files directly, peer-to-peer
+      </text>
+    </g>
+    
+    <!-- Simple button -->
+    <g transform="translate(0, 200)">
+      <rect x="-120" y="-30" width="240" height="60" rx="12" fill="url(#buttonGrad)"/>
+      <text x="0" y="8" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="600" fill="#ffffff" text-anchor="middle">
+        Start Sharing
+      </text>
+    </g>
+    
+    <!-- Small butterflies floating -->
+    <g transform="translate(-200, -100)" opacity="0.4">
+      <ellipse cx="0" cy="0" rx="3" ry="25" fill="url(#bodyGrad4)"/>
+      <circle cx="0" cy="-25" r="5" fill="url(#bodyGrad4)"/>
+      <ellipse cx="-20" cy="-8" rx="28" ry="20" fill="url(#wingGrad4)" transform="rotate(-10 -20 -8)"/>
+      <ellipse cx="20" cy="-8" rx="28" ry="20" fill="url(#wingGrad4)" transform="rotate(10 20 -8)"/>
+    </g>
+    
+    <g transform="translate(200, -80)" opacity="0.4">
+      <ellipse cx="0" cy="0" rx="3" ry="25" fill="url(#bodyGrad4)"/>
+      <circle cx="0" cy="-25" r="5" fill="url(#bodyGrad4)"/>
+      <ellipse cx="-20" cy="-8" rx="28" ry="20" fill="url(#wingGrad4)" transform="rotate(-10 -20 -8)"/>
+      <ellipse cx="20" cy="-8" rx="28" ry="20" fill="url(#wingGrad4)" transform="rotate(10 20 -8)"/>
+    </g>
+  </g>
+  
+  <!-- Title -->
+  <text x="1100" y="950" font-family="system-ui, -apple-system, sans-serif" font-size="72" font-weight="700" fill="#1e40af" text-anchor="middle">
+    Beautifully Simple
+  </text>
+  
+  <!-- Subtitle -->
+  <text x="1100" y="1020" font-family="system-ui, -apple-system, sans-serif" font-size="36" font-weight="400" fill="#64748b" text-anchor="middle">
+    No signup. No accounts. Just drag, drop, and share.
+  </text>
+</svg>
+

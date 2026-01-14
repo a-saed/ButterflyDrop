@@ -1,0 +1,126 @@
+<svg width="2200" height="1100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Gradient for background -->
+    <linearGradient id="bgGrad3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fef3c7;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#fde68a;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Wing gradient -->
+    <linearGradient id="wingGrad3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#60a5fa;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#93c5fd;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Body gradient -->
+    <linearGradient id="bodyGrad3" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e40af;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Speed lines gradient -->
+    <linearGradient id="speedGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:0" />
+      <stop offset="50%" style="stop-color:#60a5fa;stop-opacity:0.6" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:0" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="2200" height="1100" fill="url(#bgGrad3)"/>
+  
+  <!-- Speed lines -->
+  <rect x="0" y="300" width="2200" height="4" fill="url(#speedGrad)" opacity="0.3"/>
+  <rect x="0" y="400" width="2200" height="3" fill="url(#speedGrad)" opacity="0.25"/>
+  <rect x="0" y="500" width="2200" height="4" fill="url(#speedGrad)" opacity="0.3"/>
+  <rect x="0" y="600" width="2200" height="3" fill="url(#speedGrad)" opacity="0.25"/>
+  <rect x="0" y="700" width="2200" height="4" fill="url(#speedGrad)" opacity="0.3"/>
+  
+  <!-- Multiple butterflies flying fast -->
+  <g transform="translate(200, 500)">
+    <ellipse cx="0" cy="0" rx="8" ry="60" fill="url(#bodyGrad3)"/>
+    <circle cx="0" cy="-60" r="12" fill="url(#bodyGrad3)"/>
+    <ellipse cx="-50" cy="-20" rx="70" ry="50" fill="url(#wingGrad3)" transform="rotate(-25 -50 -20)"/>
+    <ellipse cx="50" cy="-20" rx="70" ry="50" fill="url(#wingGrad3)" transform="rotate(25 50 -20)"/>
+    <ellipse cx="-65" cy="-20" rx="35" ry="28" fill="#93c5fd" transform="rotate(-25 -65 -20)"/>
+    <ellipse cx="65" cy="-20" rx="35" ry="28" fill="#93c5fd" transform="rotate(25 65 -20)"/>
+    <!-- File -->
+    <rect x="-20" y="-100" width="40" height="50" rx="3" fill="#ffffff" stroke="#3b82f6" stroke-width="2" opacity="0.9"/>
+    <rect x="-16" y="-90" width="32" height="3" fill="#93c5fd"/>
+  </g>
+  
+  <g transform="translate(600, 450)">
+    <ellipse cx="0" cy="0" rx="8" ry="60" fill="url(#bodyGrad3)"/>
+    <circle cx="0" cy="-60" r="12" fill="url(#bodyGrad3)"/>
+    <ellipse cx="-50" cy="-20" rx="70" ry="50" fill="url(#wingGrad3)" transform="rotate(-20 -50 -20)"/>
+    <ellipse cx="50" cy="-20" rx="70" ry="50" fill="url(#wingGrad3)" transform="rotate(20 50 -20)"/>
+    <ellipse cx="-65" cy="-20" rx="35" ry="28" fill="#93c5fd" transform="rotate(-20 -65 -20)"/>
+    <ellipse cx="65" cy="-20" rx="35" ry="28" fill="#93c5fd" transform="rotate(20 65 -20)"/>
+    <!-- File -->
+    <rect x="-20" y="-100" width="40" height="50" rx="3" fill="#ffffff" stroke="#60a5fa" stroke-width="2" opacity="0.9"/>
+    <rect x="-16" y="-90" width="32" height="3" fill="#60a5fa"/>
+  </g>
+  
+  <g transform="translate(1000, 500)">
+    <ellipse cx="0" cy="0" rx="8" ry="60" fill="url(#bodyGrad3)"/>
+    <circle cx="0" cy="-60" r="12" fill="url(#bodyGrad3)"/>
+    <ellipse cx="-50" cy="-20" rx="70" ry="50" fill="url(#wingGrad3)" transform="rotate(-15 -50 -20)"/>
+    <ellipse cx="50" cy="-20" rx="70" ry="50" fill="url(#wingGrad3)" transform="rotate(15 50 -20)"/>
+    <ellipse cx="-65" cy="-20" rx="35" ry="28" fill="#93c5fd" transform="rotate(-15 -65 -20)"/>
+    <ellipse cx="65" cy="-20" rx="35" ry="28" fill="#93c5fd" transform="rotate(15 65 -20)"/>
+    <!-- Folder -->
+    <g transform="translate(0, -110)">
+      <path d="M -25 -20 L -25 20 L 25 20 L 25 -10 L 15 -20 Z" fill="#ffffff" stroke="#3b82f6" stroke-width="2" opacity="0.9"/>
+      <rect x="-20" y="-15" width="30" height="3" fill="#93c5fd"/>
+      <rect x="-20" y="-8" width="25" height="3" fill="#e2e8f0"/>
+    </g>
+  </g>
+  
+  <g transform="translate(1400, 450)">
+    <ellipse cx="0" cy="0" rx="8" ry="60" fill="url(#bodyGrad3)"/>
+    <circle cx="0" cy="-60" r="12" fill="url(#bodyGrad3)"/>
+    <ellipse cx="-50" cy="-20" rx="70" ry="50" fill="url(#wingGrad3)" transform="rotate(-25 -50 -20)"/>
+    <ellipse cx="50" cy="-20" rx="70" ry="50" fill="url(#wingGrad3)" transform="rotate(25 50 -20)"/>
+    <ellipse cx="-65" cy="-20" rx="35" ry="28" fill="#93c5fd" transform="rotate(-25 -65 -20)"/>
+    <ellipse cx="65" cy="-20" rx="35" ry="28" fill="#93c5fd" transform="rotate(25 65 -20)"/>
+    <!-- File -->
+    <rect x="-20" y="-100" width="40" height="50" rx="3" fill="#ffffff" stroke="#93c5fd" stroke-width="2" opacity="0.9"/>
+    <rect x="-16" y="-90" width="32" height="3" fill="#93c5fd"/>
+  </g>
+  
+  <g transform="translate(1800, 500)">
+    <ellipse cx="0" cy="0" rx="8" ry="60" fill="url(#bodyGrad3)"/>
+    <circle cx="0" cy="-60" r="12" fill="url(#bodyGrad3)"/>
+    <ellipse cx="-50" cy="-20" rx="70" ry="50" fill="url(#wingGrad3)" transform="rotate(-20 -50 -20)"/>
+    <ellipse cx="50" cy="-20" rx="70" ry="50" fill="url(#wingGrad3)" transform="rotate(20 50 -20)"/>
+    <ellipse cx="-65" cy="-20" rx="35" ry="28" fill="#93c5fd" transform="rotate(-20 -65 -20)"/>
+    <ellipse cx="65" cy="-20" rx="35" ry="28" fill="#93c5fd" transform="rotate(20 65 -20)"/>
+    <!-- File -->
+    <rect x="-20" y="-100" width="40" height="50" rx="3" fill="#ffffff" stroke="#3b82f6" stroke-width="2" opacity="0.9"/>
+    <rect x="-16" y="-90" width="32" height="3" fill="#3b82f6"/>
+  </g>
+  
+  <!-- Speed indicator -->
+  <g transform="translate(1100, 200)">
+    <circle cx="0" cy="0" r="100" fill="#ffffff" stroke="#10b981" stroke-width="6" opacity="0.95"/>
+    <text x="0" y="-20" font-family="system-ui, -apple-system, sans-serif" font-size="64" font-weight="700" fill="#10b981" text-anchor="middle">⚡</text>
+    <text x="0" y="40" font-family="system-ui, -apple-system, sans-serif" font-size="36" font-weight="700" fill="#10b981" text-anchor="middle">Fast</text>
+  </g>
+  
+  <!-- Title -->
+  <text x="1100" y="850" font-family="system-ui, -apple-system, sans-serif" font-size="80" font-weight="700" fill="#1e40af" text-anchor="middle">
+    Lightning Fast
+  </text>
+  
+  <!-- Subtitle -->
+  <text x="1100" y="920" font-family="system-ui, -apple-system, sans-serif" font-size="40" font-weight="400" fill="#64748b" text-anchor="middle">
+    Transfer files instantly, directly between devices
+  </text>
+  
+  <!-- Stats -->
+  <text x="1100" y="980" font-family="system-ui, -apple-system, sans-serif" font-size="32" font-weight="300" fill="#3b82f6" text-anchor="middle">
+    Up to 100 MB/s • Zero setup • Works in your browser
+  </text>
+</svg>
+

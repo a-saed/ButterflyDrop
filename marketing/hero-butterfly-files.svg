@@ -1,0 +1,123 @@
+<svg width="2200" height="1100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Gradient for background -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#eff6ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#dbeafe;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Wing gradient -->
+    <linearGradient id="wingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#60a5fa;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#93c5fd;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Body gradient -->
+    <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e40af;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Glow filter -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="2200" height="1100" fill="url(#bgGradient)"/>
+  
+  <!-- Decorative circles -->
+  <circle cx="200" cy="200" r="150" fill="#93c5fd" opacity="0.1"/>
+  <circle cx="2000" cy="900" r="200" fill="#60a5fa" opacity="0.1"/>
+  <circle cx="1800" cy="200" r="100" fill="#3b82f6" opacity="0.1"/>
+  
+  <!-- Main butterfly carrying files -->
+  <g transform="translate(1100, 400)">
+    <!-- Butterfly body -->
+    <ellipse cx="0" cy="0" rx="8" ry="60" fill="url(#bodyGrad)"/>
+    <circle cx="0" cy="-60" r="12" fill="url(#bodyGrad)"/>
+    
+    <!-- Left wing -->
+    <ellipse cx="-50" cy="-20" rx="70" ry="50" fill="url(#wingGrad)" transform="rotate(-15 -50 -20)"/>
+    <ellipse cx="-65" cy="-20" rx="35" ry="28" fill="#93c5fd" transform="rotate(-15 -65 -20)"/>
+    <circle cx="-70" cy="-25" r="8" fill="rgba(255,255,255,0.7)"/>
+    <circle cx="-50" cy="-10" r="5" fill="rgba(255,255,255,0.7)"/>
+    
+    <!-- Right wing -->
+    <ellipse cx="50" cy="-20" rx="70" ry="50" fill="url(#wingGrad)" transform="rotate(15 50 -20)"/>
+    <ellipse cx="65" cy="-20" rx="35" ry="28" fill="#93c5fd" transform="rotate(15 65 -20)"/>
+    <circle cx="70" cy="-25" r="8" fill="rgba(255,255,255,0.7)"/>
+    <circle cx="50" cy="-10" r="5" fill="rgba(255,255,255,0.7)"/>
+    
+    <!-- Antennae -->
+    <path d="M -4 -60 Q -8 -75 -10 -85" stroke="#3b82f6" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M 4 -60 Q 8 -75 10 -85" stroke="#3b82f6" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <circle cx="-10" cy="-85" r="4" fill="#3b82f6"/>
+    <circle cx="10" cy="-85" r="4" fill="#3b82f6"/>
+    
+    <!-- Files being carried -->
+    <g transform="translate(-80, -120)">
+      <!-- File 1 -->
+      <rect x="0" y="0" width="60" height="80" rx="4" fill="#ffffff" stroke="#3b82f6" stroke-width="2" filter="url(#glow)"/>
+      <rect x="8" y="12" width="44" height="4" fill="#93c5fd"/>
+      <rect x="8" y="22" width="30" height="4" fill="#dbeafe"/>
+      <rect x="8" y="32" width="35" height="4" fill="#dbeafe"/>
+      <circle cx="45" cy="50" r="8" fill="#3b82f6" opacity="0.3"/>
+    </g>
+    
+    <g transform="translate(20, -140)">
+      <!-- File 2 -->
+      <rect x="0" y="0" width="60" height="80" rx="4" fill="#ffffff" stroke="#60a5fa" stroke-width="2" filter="url(#glow)"/>
+      <rect x="8" y="12" width="44" height="4" fill="#60a5fa"/>
+      <rect x="8" y="22" width="30" height="4" fill="#dbeafe"/>
+      <rect x="8" y="32" width="35" height="4" fill="#dbeafe"/>
+      <rect x="8" y="42" width="25" height="4" fill="#dbeafe"/>
+    </g>
+    
+    <g transform="translate(100, -100)">
+      <!-- File 3 -->
+      <rect x="0" y="0" width="60" height="80" rx="4" fill="#ffffff" stroke="#93c5fd" stroke-width="2" filter="url(#glow)"/>
+      <rect x="8" y="12" width="44" height="4" fill="#93c5fd"/>
+      <rect x="8" y="22" width="30" height="4" fill="#dbeafe"/>
+      <rect x="8" y="32" width="35" height="4" fill="#dbeafe"/>
+      <polygon points="45,50 50,55 45,60 40,55" fill="#60a5fa" opacity="0.5"/>
+    </g>
+  </g>
+  
+  <!-- Smaller butterflies -->
+  <g transform="translate(300, 700)" opacity="0.6">
+    <ellipse cx="0" cy="0" rx="4" ry="30" fill="url(#bodyGrad)"/>
+    <circle cx="0" cy="-30" r="6" fill="url(#bodyGrad)"/>
+    <ellipse cx="-25" cy="-10" rx="35" ry="25" fill="url(#wingGrad)" transform="rotate(-10 -25 -10)"/>
+    <ellipse cx="25" cy="-10" rx="35" ry="25" fill="url(#wingGrad)" transform="rotate(10 25 -10)"/>
+  </g>
+  
+  <g transform="translate(1900, 300)" opacity="0.5">
+    <ellipse cx="0" cy="0" rx="4" ry="30" fill="url(#bodyGrad)"/>
+    <circle cx="0" cy="-30" r="6" fill="url(#bodyGrad)"/>
+    <ellipse cx="-25" cy="-10" rx="35" ry="25" fill="url(#wingGrad)" transform="rotate(-10 -25 -10)"/>
+    <ellipse cx="25" cy="-10" rx="35" ry="25" fill="url(#wingGrad)" transform="rotate(10 25 -10)"/>
+  </g>
+  
+  <!-- Title -->
+  <text x="1100" y="750" font-family="system-ui, -apple-system, sans-serif" font-size="96" font-weight="700" fill="#1e40af" text-anchor="middle">
+    Butterfly Drop
+  </text>
+  
+  <!-- Tagline -->
+  <text x="1100" y="830" font-family="system-ui, -apple-system, sans-serif" font-size="48" font-weight="400" fill="#3b82f6" text-anchor="middle" opacity="0.8">
+    Let your files fly
+  </text>
+  
+  <!-- Subtitle -->
+  <text x="1100" y="920" font-family="system-ui, -apple-system, sans-serif" font-size="32" font-weight="300" fill="#64748b" text-anchor="middle">
+    Fast, private, peer-to-peer file sharing
+  </text>
+</svg>
+
