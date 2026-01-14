@@ -125,6 +125,7 @@ export function ButterflyContainer({ trigger }: ButterflyContainerProps) {
         break
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setButterflies(newButterflies)
 
     // Clean up after animation

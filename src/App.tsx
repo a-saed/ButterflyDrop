@@ -20,9 +20,10 @@ import { ConnectionStatus } from "@/components/connection/ConnectionStatus";
 import { createShareableUrl } from "@/lib/sessionUtils";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Upload, Send } from "lucide-react";
+import { Upload, Send, Github } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDropzone } from "react-dropzone";
+import { useSoundEffects } from "@/hooks/useSoundEffects";
 
 function AppContent() {
   const session = useSession();
@@ -30,6 +31,7 @@ function AppContent() {
   const { peers, isScanning } = usePeerDiscovery();
   const { connectionState } = useConnection();
   const { getDataChannelForPeer, getQueuedMessagesForPeer, isPeerReady, readyPeers } = useWebRTC();
+  const { playConnect, playTransferStart, playSuccess, playFileReceived, playError } = useSoundEffects();
   
   // File transfer with new API
   const {
@@ -131,6 +133,9 @@ function AppContent() {
     }
   }, [session.session, readyPeers, peers, getDataChannelForPeer, getQueuedMessagesForPeer, setupReceiver]);
 
+  // Track previous ready peers count for sound effects
+  const previousReadyPeersCountRef = useRef(0);
+
   // Show connection status when peers become ready
   useEffect(() => {
     const previousState = previousConnectionStateRef.current;
@@ -149,8 +154,13 @@ function AppContent() {
             icon: "🦋",
             duration: 3000,
           });
+          // Play connection sound when new peers connect
+          if (readyPeers.length > previousReadyPeersCountRef.current) {
+            playConnect();
+          }
         }
       }
+      previousReadyPeersCountRef.current = readyPeers.length;
       // Reset failed toast flag when connection succeeds
       connectionFailedToastShownRef.current = false;
     } else if (connectionState === "failed" && previousState !== "failed") {
@@ -161,12 +171,13 @@ function AppContent() {
           description: "Check your network and try refreshing",
           duration: 4000,
         });
+        playError();
       }
     } else if (connectionState !== "failed") {
       // Reset flag when connection state changes away from failed
       connectionFailedToastShownRef.current = false;
     }
-  }, [connectionState, readyPeers, peers]);
+  }, [connectionState, readyPeers, peers, playConnect, playError]);
 
   // Show send errors
   useEffect(() => {
@@ -175,8 +186,9 @@ function AppContent() {
         description: sendError,
         duration: 4000,
       });
+      playError();
     }
-  }, [sendError]);
+  }, [sendError, playError]);
 
   // Show receive errors
   useEffect(() => {
@@ -185,8 +197,23 @@ function AppContent() {
         description: receiveError,
         duration: 4000,
       });
+      playError();
     }
-  }, [receiveError]);
+  }, [receiveError, playError]);
+
+  // Track previous send complete state for sound effects
+  const previousSendCompleteRef = useRef(false);
+  const previousReceiveCompleteRef = useRef(false);
+
+  // Show send complete notification and play sound
+  useEffect(() => {
+    if (sendComplete && !previousSendCompleteRef.current) {
+      playSuccess();
+      previousSendCompleteRef.current = true;
+    } else if (!sendComplete) {
+      previousSendCompleteRef.current = false;
+    }
+  }, [sendComplete, playSuccess]);
 
   // Show receive complete notification
   useEffect(() => {
@@ -202,8 +229,15 @@ function AppContent() {
           duration: 5000,
         },
       );
+      // Play file received sound
+      if (!previousReceiveCompleteRef.current) {
+        playFileReceived();
+        previousReceiveCompleteRef.current = true;
+      }
+    } else if (!receiveComplete) {
+      previousReceiveCompleteRef.current = false;
     }
-  }, [receiveComplete, receivedFiles.length, incomingTransfer, receivingFromPeer, peers]);
+  }, [receiveComplete, receivedFiles.length, incomingTransfer, receivingFromPeer, peers, playFileReceived]);
 
   // File drop handling
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -263,6 +297,8 @@ function AppContent() {
     }
 
     try {
+      // Play transfer start sound
+      playTransferStart();
       await sendFiles(selectedFiles, dataChannel, selectedPeerId, peerName);
 
       // Clear files after successful transfer
@@ -280,6 +316,7 @@ function AppContent() {
     isPeerReady,
     getDataChannelForPeer,
     sendFiles,
+    playTransferStart,
   ]);
 
   const handlePeerSelect = useCallback((peerId: string) => {
@@ -359,6 +396,15 @@ function AppContent() {
               peerCount={readyPeers.length}
               sessionId={session.session?.id || null}
             />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => window.open("https://github.com/a-saed/ButterflyDrop", "_blank")}
+              className="h-9 w-9"
+              aria-label="View on GitHub"
+            >
+              <Github className="h-5 w-5" />
+            </Button>
             <ThemeToggle />
           </div>
         </header>

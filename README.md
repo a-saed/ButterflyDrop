@@ -62,6 +62,26 @@ P2P file sharing via WebRTC DataChannels. No cloud, no accounts.
 - **Speed**: ~50-100 MB/s (LAN, <10MB), ~20-60 MB/s (LAN, >100MB)
 - **Bundle**: 826 KB (254 KB gzipped)
 
+## Roadmap & Future Enhancements
+
+### 🚧 In Progress / Planned
+
+- **Multi-Peer Support**: Send files to multiple peers simultaneously in the same session
+  - Select multiple devices at once
+  - Parallel file transfers with individual progress tracking
+  - Aggregate transfer statistics
+  - See [MULTI_PEER_PLAN.md](./MULTI_PEER_PLAN.md) for detailed architecture
+
+### 🔮 Future Enhancements
+
+- **Multiple Data Channel Support**: Use multiple data channels per peer for improved throughput and parallel transfers
+- **Resumable Transfers**: Resume interrupted file transfers
+- **File Preview**: Preview images, videos, and documents before downloading
+- **Folder Structure Preservation**: Better folder transfer with nested directory support
+- **Transfer Speed Optimization**: Adaptive chunk sizing based on network conditions
+- **Transfer Queue**: Queue multiple file transfers
+- **Bandwidth Throttling**: Control upload/download speed limits
+
 ## License
 
 MIT
