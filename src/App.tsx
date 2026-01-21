@@ -20,10 +20,17 @@ import { ConnectionStatus } from "@/components/connection/ConnectionStatus";
 import { createShareableUrl } from "@/lib/sessionUtils";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Upload, Send, Github } from "lucide-react";
+import { Upload, Send, Github, FolderSync } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDropzone } from "react-dropzone";
 import { useSoundEffects } from "@/hooks/useSoundEffects";
+import { SyncList } from "@/components/sync/SyncList";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 function AppContent() {
   const session = useSession();
@@ -64,6 +71,7 @@ function AppContent() {
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedPeerId, setSelectedPeerId] = useState<string>();
+  const [isSyncDialogOpen, setIsSyncDialogOpen] = useState(false);
   
   // Track which peers have receivers set up
   const setupPeersRef = useRef<Set<string>>(new Set());
@@ -399,6 +407,16 @@ function AppContent() {
             <Button
               variant="ghost"
               size="icon"
+              onClick={() => setIsSyncDialogOpen(true)}
+              className="h-9 w-9"
+              aria-label="Folder Sync"
+              title="Folder Sync"
+            >
+              <FolderSync className="h-5 w-5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => window.open("https://github.com/a-saed/ButterflyDrop", "_blank")}
               className="h-9 w-9"
               aria-label="View on GitHub"
@@ -536,6 +554,16 @@ function AppContent() {
         onClear={clearReceivedFiles}
         formatBytes={formatBytes}
       />
+
+      {/* Sync Dialog */}
+      <Dialog open={isSyncDialogOpen} onOpenChange={setIsSyncDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Folder Sync</DialogTitle>
+          </DialogHeader>
+          <SyncList />
+        </DialogContent>
+      </Dialog>
 
       <Toaster />
     </div>
