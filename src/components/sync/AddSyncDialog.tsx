@@ -14,7 +14,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { useFolderSync } from '@/hooks/useFolderSync';
 import { useSession } from '@/contexts/SessionContext';
 import type { SyncDirection, ConflictResolution } from '@/types/sync';

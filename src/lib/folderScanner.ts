@@ -36,7 +36,11 @@ export async function requestFolderAccess(): Promise<FileSystemDirectoryHandle |
   }
 
   try {
-    const handle = await (window as any).showDirectoryPicker({
+    // TypeScript doesn't have showDirectoryPicker in Window type yet
+    const windowWithPicker = window as Window & {
+      showDirectoryPicker(options?: { mode?: 'read' | 'readwrite' }): Promise<FileSystemDirectoryHandle>;
+    };
+    const handle = await windowWithPicker.showDirectoryPicker({
       mode: 'readwrite', // Request read-write access
     });
     return handle;
@@ -72,12 +76,19 @@ export async function scanFolderWithHandle(
     }
 
     try {
-      for await (const [name, entry] of dirHandle.entries()) {
+      // FileSystemDirectoryHandle is async iterable, but TypeScript types don't include entries()
+      // Use type assertion to access the async iterator that exists at runtime
+      const dirHandleWithEntries = dirHandle as FileSystemDirectoryHandle & {
+        entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
+      };
+      
+      // Iterate over directory entries
+      for await (const [name, entry] of dirHandleWithEntries.entries()) {
         const entryPath = currentPath ? `${currentPath}/${name}` : name;
 
         if (entry.kind === 'file') {
           try {
-            const file = await entry.getFile();
+            const file = await (entry as FileSystemFileHandle).getFile();
             const hash = await calculateFileHash(file);
 
             const snapshot: FileSnapshot = {
@@ -95,7 +106,7 @@ export async function scanFolderWithHandle(
             console.error(`Failed to read file ${entryPath}:`, error);
           }
         } else if (entry.kind === 'directory') {
-          await scanDirectory(entry, entryPath, depth + 1);
+          await scanDirectory(entry as FileSystemDirectoryHandle, entryPath, depth + 1);
         }
       }
     } catch (error) {
@@ -129,7 +140,8 @@ export async function scanFolderWithFileList(
           // Use metadata hash for faster processing (full hash can be slow)
           // For sync, we'll use full hash only when needed
           const hash = calculateMetadataHash(file);
-          const path = (file as any).webkitRelativePath || file.name;
+          // webkitRelativePath is available on File objects from folder input
+          const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
 
           const snapshot: FileSnapshot = {
             path,

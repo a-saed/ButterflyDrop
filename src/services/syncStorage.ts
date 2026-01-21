@@ -14,12 +14,6 @@ const STORES = {
   SYNC_STATES: 'syncStates',
 } as const;
 
-interface DBSchema {
-  [STORES.SYNC_CONFIGS]: SyncConfig;
-  [STORES.FILE_SNAPSHOTS]: FileSnapshot;
-  [STORES.SYNC_STATES]: SyncState;
-}
-
 class SyncStorageService {
   private db: IDBDatabase | null = null;
   private initPromise: Promise<void> | null = null;

@@ -11,17 +11,14 @@ import {
   scanFolderWithHandle,
   scanFolderWithFileList,
   createFolderInput,
-  compareSnapshots,
   detectBrowserCapabilities,
 } from '@/lib/folderScanner';
 import { useSession } from '@/contexts/SessionContext';
 import { useWebRTC } from './useWebRTC_v2';
-import { useFileTransfer } from './useFileTransfer';
 
 export function useFolderSync() {
-  const { session, peers } = useSession();
+  const { session } = useSession();
   const { getDataChannelForPeer, isPeerReady } = useWebRTC();
-  const { sendFiles } = useFileTransfer();
   
   const [syncConfigs, setSyncConfigs] = useState<SyncConfig[]>([]);
   const [syncStates, setSyncStates] = useState<Map<string, SyncState>>(new Map());
