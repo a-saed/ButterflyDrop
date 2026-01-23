@@ -59,9 +59,17 @@ class AsyncQueue {
 }
 
 export function useFolderSync() {
-  const { session } = useSession();
-  const { getDataChannelForPeer, isPeerReady } = useWebRTC();
+  const { session, peers } = useSession();
+  const { getDataChannelForPeer, isPeerReady, readyPeers } = useWebRTC();
   const { sendFiles } = useFileTransfer();
+
+  // Debug: log peers and ready peers
+  console.log("🔍 useFolderSync state:", {
+    peersCount: peers.length,
+    peers: peers.map((p) => ({ id: p.id, name: p.name, online: p.isOnline })),
+    readyPeersCount: readyPeers?.length || 0,
+    readyPeerIds: readyPeers || [],
+  });
 
   const [syncConfigs, setSyncConfigs] = useState<SyncConfig[]>([]);
   const [syncStates, setSyncStates] = useState<Map<string, SyncState>>(
@@ -312,18 +320,28 @@ export function useFolderSync() {
           throw new Error(`Sync config ${configId} not found`);
         }
 
-        // Check if peer is ready - just warn, don't block
+        // Check if peer is ready
         const peerReady = isPeerReady(config.peerId);
-        console.log(`🔍 Peer ${config.peerId} ready:`, peerReady);
+        console.log(`🔍 Checking peer ${config.peerId} (${config.peerName}):`, {
+          peerReady,
+          configId,
+        });
 
         if (!peerReady) {
-          toast.warning(
-            `${config.peerName} is not connected. Trying to rescan folder...`,
+          console.warn(`⚠️ Peer not ready, rescanning folder only`);
+          toast.info(
+            `Scanning folder... (${config.peerName} not connected yet)`,
           );
-          // Just rescan locally instead of failing
-          await scanFolder(configId);
+
+          // Just rescan and update local state
+          const snapshots = await scanFolder(configId);
+          console.log(`✅ Local scan complete: ${snapshots.length} files`);
+          toast.success(`Found ${snapshots.length} files in folder`);
           return;
         }
+
+        console.log(`✅ Peer ready, starting full sync...`);
+        toast.info(`Starting sync with ${config.peerName}...`);
 
         // Update status to syncing
         await syncStorage.updateSyncStatus(configId, "syncing");
