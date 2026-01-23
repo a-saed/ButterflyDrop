@@ -434,7 +434,7 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
         }),
       );
 
-      let forwardedCount = 1;
+      const forwardedCount = 1;
 
       console.log(
         `Forwarded ICE candidate to ${forwardedCount} peer(s) in session ${sessionId}`,
@@ -645,8 +645,11 @@ process.on("uncaughtException", (error: Error) => {
   shutdown();
 });
 
-process.on("unhandledRejection", (reason: unknown, promise: Promise<unknown>) => {
-  console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
-});
+process.on(
+  "unhandledRejection",
+  (reason: unknown, promise: Promise<unknown>) => {
+    console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
+  },
+);
 
 console.log("✅ Signal handlers registered");
