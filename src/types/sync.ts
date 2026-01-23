@@ -3,9 +3,19 @@
  * Supports cross-browser folder synchronization
  */
 
-export type SyncDirection = 'bidirectional' | 'upload-only' | 'download-only';
-export type SyncStatus = 'synced' | 'out-of-sync' | 'syncing' | 'error' | 'conflict' | 'offline';
-export type ConflictResolution = 'last-write-wins' | 'manual' | 'local-wins' | 'remote-wins';
+export type SyncDirection = "bidirectional" | "upload-only" | "download-only";
+export type SyncStatus =
+  | "synced"
+  | "out-of-sync"
+  | "syncing"
+  | "error"
+  | "conflict"
+  | "offline";
+export type ConflictResolution =
+  | "last-write-wins"
+  | "manual"
+  | "local-wins"
+  | "remote-wins";
 
 /**
  * Sync configuration - defines a folder sync relationship
@@ -64,19 +74,19 @@ export interface ConflictFile {
   path: string;
   local: FileSnapshot;
   remote: FileSnapshot;
-  resolution?: 'local' | 'remote' | 'both' | 'manual';
+  resolution?: "local" | "remote" | "both" | "manual";
 }
 
 /**
  * Sync message types for WebRTC communication
  */
-export type SyncMessageType = 
-  | 'sync-request'      // Request sync with peer
-  | 'sync-metadata'     // Exchange file metadata
-  | 'sync-file'         // Transfer file
-  | 'sync-complete'     // Sync finished
-  | 'sync-conflict'     // Conflict detected
-  | 'sync-error';       // Error occurred
+export type SyncMessageType =
+  | "sync-request" // Request sync with peer
+  | "sync-metadata" // Exchange file metadata
+  | "sync-file" // Transfer file
+  | "sync-complete" // Sync finished
+  | "sync-conflict" // Conflict detected
+  | "sync-error"; // Error occurred
 
 export interface SyncMessage {
   type: SyncMessageType;
@@ -89,7 +99,7 @@ export interface SyncMessage {
  * File change detection result
  */
 export interface FileChange {
-  type: 'created' | 'modified' | 'deleted';
+  type: "created" | "modified" | "deleted";
   snapshot: FileSnapshot;
   previousSnapshot?: FileSnapshot;
 }
@@ -103,4 +113,3 @@ export interface BrowserCapabilities {
   hasWebWorkers: boolean;
   isMobile: boolean;
 }
-
