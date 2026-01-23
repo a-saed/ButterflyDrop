@@ -268,7 +268,7 @@ export function useFolderSync() {
             configId,
             localSnapshot: snapshots,
             remoteSnapshot: currentState?.remoteSnapshot || null,
-            status: currentState?.remoteSnapshot ? "out-of-sync" : "synced",
+            status: snapshots.length > 0 ? "synced" : "out-of-sync",
             lastCheckedAt: Date.now(),
             pendingChanges: {
               local: [],
@@ -279,6 +279,12 @@ export function useFolderSync() {
 
           await syncStorage.saveSyncState(newState);
           setSyncStates((prev) => new Map(prev).set(configId, newState));
+
+          console.log("✅ Scan complete:", {
+            configId,
+            fileCount: snapshots.length,
+            status: newState.status,
+          });
 
           return snapshots;
         } catch (err) {

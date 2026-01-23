@@ -137,10 +137,10 @@ export function SyncWizard({ open, onOpenChange, onSuccess }: SyncWizardProps) {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create Folder Sync</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-xs sm:text-sm">
             Set up automatic folder synchronization with a peer device
           </DialogDescription>
         </DialogHeader>
@@ -203,7 +203,7 @@ export function SyncWizard({ open, onOpenChange, onSuccess }: SyncWizardProps) {
         )}
 
         {/* Step Content */}
-        <div className="py-6 min-h-[300px]">
+        <div className="py-4 sm:py-6 min-h-[250px] sm:min-h-[300px]">
           {/* Step 1: Peer Selection */}
           {currentStep === "peer" && (
             <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">

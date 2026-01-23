@@ -24,7 +24,7 @@ import { Upload, Send, Github, FolderSync } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDropzone } from "react-dropzone";
 import { useSoundEffects } from "@/hooks/useSoundEffects";
-import { SyncWizard } from "@/components/sync/SyncWizard";
+import { SimpleSyncDialog } from "@/components/sync/SimpleSyncDialog";
 import { SyncDashboard } from "@/components/sync/SyncDashboard";
 import {
   Dialog,
@@ -637,8 +637,8 @@ function AppContent() {
         </DialogContent>
       </Dialog>
 
-      {/* Sync Wizard */}
-      <SyncWizard
+      {/* Simple Sync Dialog */}
+      <SimpleSyncDialog
         open={isSyncWizardOpen}
         onOpenChange={setIsSyncWizardOpen}
         onSuccess={() => {
