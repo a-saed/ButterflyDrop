@@ -312,20 +312,17 @@ export function useFolderSync() {
           throw new Error(`Sync config ${configId} not found`);
         }
 
-        // Check if peer is ready
-        if (!isPeerReady(config.peerId)) {
-          await syncStorage.updateSyncStatus(configId, "offline");
-          setSyncStates((prev) => {
-            const state = prev.get(configId);
-            if (state) {
-              return new Map(prev).set(configId, {
-                ...state,
-                status: "offline" as SyncStatus,
-              });
-            }
-            return prev;
-          });
-          throw new Error("Peer is not connected");
+        // Check if peer is ready - just warn, don't block
+        const peerReady = isPeerReady(config.peerId);
+        console.log(`🔍 Peer ${config.peerId} ready:`, peerReady);
+
+        if (!peerReady) {
+          toast.warning(
+            `${config.peerName} is not connected. Trying to rescan folder...`,
+          );
+          // Just rescan locally instead of failing
+          await scanFolder(configId);
+          return;
         }
 
         // Update status to syncing
