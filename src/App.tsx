@@ -24,7 +24,8 @@ import { Upload, Send, Github, FolderSync } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDropzone } from "react-dropzone";
 import { useSoundEffects } from "@/hooks/useSoundEffects";
-import { SyncList } from "@/components/sync/SyncList";
+import { SyncWizard } from "@/components/sync/SyncWizard";
+import { SyncDashboard } from "@/components/sync/SyncDashboard";
 import {
   Dialog,
   DialogContent,
@@ -37,9 +38,20 @@ function AppContent() {
   const { joinSession } = session;
   const { peers, isScanning } = usePeerDiscovery();
   const { connectionState } = useConnection();
-  const { getDataChannelForPeer, getQueuedMessagesForPeer, isPeerReady, readyPeers } = useWebRTC();
-  const { playConnect, playTransferStart, playSuccess, playFileReceived, playError } = useSoundEffects();
-  
+  const {
+    getDataChannelForPeer,
+    getQueuedMessagesForPeer,
+    isPeerReady,
+    readyPeers,
+  } = useWebRTC();
+  const {
+    playConnect,
+    playTransferStart,
+    playSuccess,
+    playFileReceived,
+    playError,
+  } = useSoundEffects();
+
   // File transfer with new API
   const {
     // Sending state
@@ -48,7 +60,7 @@ function AppContent() {
     sendProgress,
     sendComplete,
     sendError,
-    // Receiving state  
+    // Receiving state
     isReceiving,
     receivingFromPeer,
     receiveProgress,
@@ -72,7 +84,8 @@ function AppContent() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedPeerId, setSelectedPeerId] = useState<string>();
   const [isSyncDialogOpen, setIsSyncDialogOpen] = useState(false);
-  
+  const [isSyncWizardOpen, setIsSyncWizardOpen] = useState(false);
+
   // Track which peers have receivers set up
   const setupPeersRef = useRef<Set<string>>(new Set());
   // Track if we've already shown connection failed toast
@@ -86,36 +99,39 @@ function AppContent() {
     : "";
 
   // Handle QR code scan success
-  const handleQRScanSuccess = useCallback((sessionId: string) => {
-    // Prevent duplicate joins - check if already in this session
-    if (session.session?.id === sessionId) {
-      console.log(`⚠️ Already in session ${sessionId}, skipping`);
-      return;
-    }
+  const handleQRScanSuccess = useCallback(
+    (sessionId: string) => {
+      // Prevent duplicate joins - check if already in this session
+      if (session.session?.id === sessionId) {
+        console.log(`⚠️ Already in session ${sessionId}, skipping`);
+        return;
+      }
 
-    // Prevent duplicate joins from QR scanner
-    if (joinedSessionsRef.current.has(sessionId)) {
-      console.log(`⚠️ Already joined session ${sessionId}, skipping`);
-      return;
-    }
+      // Prevent duplicate joins from QR scanner
+      if (joinedSessionsRef.current.has(sessionId)) {
+        console.log(`⚠️ Already joined session ${sessionId}, skipping`);
+        return;
+      }
 
-    console.log(`📱 QR Code scanned, joining session: ${sessionId}`);
-    
-    // Mark as joined before calling joinSession
-    joinedSessionsRef.current.add(sessionId);
-    
-    // Join the session
-    joinSession(sessionId);
-    
-    // Update URL to reflect the new session
-    const newHash = `#session=${sessionId}`;
-    window.history.replaceState(null, "", newHash);
-    
-    toast.success("Session joined!", {
-      description: "Connecting to peers...",
-      icon: "🦋",
-    });
-  }, [joinSession, session.session]);
+      console.log(`📱 QR Code scanned, joining session: ${sessionId}`);
+
+      // Mark as joined before calling joinSession
+      joinedSessionsRef.current.add(sessionId);
+
+      // Join the session
+      joinSession(sessionId);
+
+      // Update URL to reflect the new session
+      const newHash = `#session=${sessionId}`;
+      window.history.replaceState(null, "", newHash);
+
+      toast.success("Session joined!", {
+        description: "Connecting to peers...",
+        icon: "🦋",
+      });
+    },
+    [joinSession, session.session],
+  );
 
   // Setup file receiver for all ready peers
   // This is CRITICAL - must set up onmessage handler before files arrive
@@ -124,22 +140,29 @@ function AppContent() {
       readyPeers.forEach((peerId) => {
         // Skip if already set up
         if (setupPeersRef.current.has(peerId)) return;
-        
+
         const dataChannel = getDataChannelForPeer(peerId);
         if (dataChannel && dataChannel.readyState === "open") {
           const peer = peers.find((p) => p.id === peerId);
           const peerName = peer?.name || "Unknown Device";
-          
+
           // Get any messages that were queued before we set up the handler
           const queuedMessages = getQueuedMessagesForPeer(peerId);
-          
+
           console.log(`🔧 Setting up receiver for ${peerName} (${peerId})`);
           setupReceiver(peerId, peerName, dataChannel, queuedMessages);
           setupPeersRef.current.add(peerId);
         }
       });
     }
-  }, [session.session, readyPeers, peers, getDataChannelForPeer, getQueuedMessagesForPeer, setupReceiver]);
+  }, [
+    session.session,
+    readyPeers,
+    peers,
+    getDataChannelForPeer,
+    getQueuedMessagesForPeer,
+    setupReceiver,
+  ]);
 
   // Track previous ready peers count for sound effects
   const previousReadyPeersCountRef = useRef(0);
@@ -150,7 +173,9 @@ function AppContent() {
     previousConnectionStateRef.current = connectionState;
 
     if (readyPeers.length > 0) {
-      const newPeers = readyPeers.filter((id) => !setupPeersRef.current.has(id));
+      const newPeers = readyPeers.filter(
+        (id) => !setupPeersRef.current.has(id),
+      );
       if (newPeers.length > 0) {
         const peerNames = peers
           .filter((p) => newPeers.includes(p.id))
@@ -226,8 +251,11 @@ function AppContent() {
   // Show receive complete notification
   useEffect(() => {
     if (receiveComplete && receivedFiles.length > 0) {
-      const peerName = incomingTransfer?.peerName || 
-        (receivingFromPeer ? peers.find((p) => p.id === receivingFromPeer)?.name : null) || 
+      const peerName =
+        incomingTransfer?.peerName ||
+        (receivingFromPeer
+          ? peers.find((p) => p.id === receivingFromPeer)?.name
+          : null) ||
         "peer";
       toast.success(
         `${receivedFiles.length} file${receivedFiles.length > 1 ? "s" : ""} received from ${peerName}!`,
@@ -245,7 +273,14 @@ function AppContent() {
     } else if (!receiveComplete) {
       previousReceiveCompleteRef.current = false;
     }
-  }, [receiveComplete, receivedFiles.length, incomingTransfer, receivingFromPeer, peers, playFileReceived]);
+  }, [
+    receiveComplete,
+    receivedFiles.length,
+    incomingTransfer,
+    receivingFromPeer,
+    peers,
+    playFileReceived,
+  ]);
 
   // File drop handling
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -253,7 +288,7 @@ function AppContent() {
       setSelectedFiles((prev) => [...prev, ...acceptedFiles]);
       toast.success(
         `${acceptedFiles.length} file${acceptedFiles.length > 1 ? "s" : ""} added`,
-        { icon: "📁" }
+        { icon: "📁" },
       );
     }
   }, []);
@@ -327,13 +362,19 @@ function AppContent() {
     playTransferStart,
   ]);
 
-  const handlePeerSelect = useCallback((peerId: string) => {
-        setSelectedPeerId(peerId);
-          const peer = peers.find((p) => p.id === peerId);
-    if (peer && selectedFiles.length > 0) {
-      toast.info(`Ready to send to ${peer.name}`, { icon: "📱", duration: 2000 });
-        }
-  }, [selectedFiles, peers]);
+  const handlePeerSelect = useCallback(
+    (peerId: string) => {
+      setSelectedPeerId(peerId);
+      const peer = peers.find((p) => p.id === peerId);
+      if (peer && selectedFiles.length > 0) {
+        toast.info(`Ready to send to ${peer.name}`, {
+          icon: "📱",
+          duration: 2000,
+        });
+      }
+    },
+    [selectedFiles, peers],
+  );
 
   // Auto-select first peer when peers are discovered
   useEffect(() => {
@@ -353,7 +394,7 @@ function AppContent() {
     isPeerReady(selectedPeerId);
 
   // Get selected peer name
-  const selectedPeerName = selectedPeerId 
+  const selectedPeerName = selectedPeerId
     ? peers.find((p) => p.id === selectedPeerId)?.name || "peer"
     : "";
 
@@ -380,13 +421,18 @@ function AppContent() {
       )}
 
       {/* Main Content */}
-      <div className="relative min-h-screen flex flex-col" style={{ zIndex: 10 }}>
+      <div
+        className="relative min-h-screen flex flex-col"
+        style={{ zIndex: 10 }}
+      >
         {/* Header */}
         <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 p-4 sm:p-6 border-b border-border/50 backdrop-blur-sm bg-background/50">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <ButterflyLogo />
             <div className="min-w-0">
-              <h1 className="text-lg sm:text-xl font-semibold truncate">Butterfly Drop</h1>
+              <h1 className="text-lg sm:text-xl font-semibold truncate">
+                Butterfly Drop
+              </h1>
               <p className="text-sm sm:text-base md:text-lg font-medium text-muted-foreground">
                 Let your files fly
               </p>
@@ -417,7 +463,9 @@ function AppContent() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => window.open("https://github.com/a-saed/ButterflyDrop", "_blank")}
+              onClick={() =>
+                window.open("https://github.com/a-saed/ButterflyDrop", "_blank")
+              }
               className="h-9 w-9"
               aria-label="View on GitHub"
             >
@@ -456,67 +504,85 @@ function AppContent() {
                 sendProgress={sendProgress}
                 sendComplete={sendComplete}
                 sendError={sendError}
-                peerName={sendingToPeer ? peers.find((p) => p.id === sendingToPeer)?.name || "peer" : selectedPeerName}
+                peerName={
+                  sendingToPeer
+                    ? peers.find((p) => p.id === sendingToPeer)?.name || "peer"
+                    : selectedPeerName
+                }
                 onReset={resetSendState}
               />
 
               {/* File Selection Area - Only show when not sending */}
               {!isSending && !sendComplete && (
                 <>
-              {selectedFiles.length > 0 ? (
-                <div className="bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl p-4 shadow-2xl">
-                  <FileList
-                    files={selectedFiles}
-                    onRemove={handleRemoveFile}
-                    onClear={handleClearFiles}
-                  />
+                  {selectedFiles.length > 0 ? (
+                    <div className="bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl p-4 shadow-2xl">
+                      <FileList
+                        files={selectedFiles}
+                        onRemove={handleRemoveFile}
+                        onClear={handleClearFiles}
+                      />
 
                       {/* Send Button */}
-                  {canSend && (
-                    <div className="flex justify-center mt-4">
-                      <Button
-                        size="lg"
-                        onClick={handleSend}
-                        className="gap-2 min-w-60 h-12 text-base shadow-lg hover:shadow-xl transition-all"
-                      >
-                        <Send className="h-5 w-5" />
-                            Send {selectedFiles.length} file{selectedFiles.length > 1 ? "s" : ""} to {selectedPeerName}
-                      </Button>
-                    </div>
-                  )}
-
-                      {/* Waiting for peer */}
-                      {selectedFiles.length > 0 && !canSend && peers.length === 0 && (
-                        <div className="text-center mt-4 text-sm text-muted-foreground">
-                          <p>Share the link above to connect with another device</p>
+                      {canSend && (
+                        <div className="flex justify-center mt-4">
+                          <Button
+                            size="lg"
+                            onClick={handleSend}
+                            className="gap-2 min-w-60 h-12 text-base shadow-lg hover:shadow-xl transition-all"
+                          >
+                            <Send className="h-5 w-5" />
+                            Send {selectedFiles.length} file
+                            {selectedFiles.length > 1 ? "s" : ""} to{" "}
+                            {selectedPeerName}
+                          </Button>
                         </div>
                       )}
 
+                      {/* Waiting for peer */}
+                      {selectedFiles.length > 0 &&
+                        !canSend &&
+                        peers.length === 0 && (
+                          <div className="text-center mt-4 text-sm text-muted-foreground">
+                            <p>
+                              Share the link above to connect with another
+                              device
+                            </p>
+                          </div>
+                        )}
+
                       {/* Waiting for connection */}
-                      {selectedFiles.length > 0 && !canSend && peers.length > 0 && selectedPeerId && !isPeerReady(selectedPeerId) && (
-                      <div className="text-center mt-4 text-sm text-muted-foreground">
-                          <p>Establishing connection with {selectedPeerName}...</p>
-                      </div>
-                    )}
-                </div>
-              ) : (
-                <div className="bg-background/80 backdrop-blur-sm border border-border/50 rounded-2xl p-6 text-center">
-                  <Upload className="h-10 w-10 text-muted-foreground/50 mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground mb-3">
-                        {peers.length > 0 
+                      {selectedFiles.length > 0 &&
+                        !canSend &&
+                        peers.length > 0 &&
+                        selectedPeerId &&
+                        !isPeerReady(selectedPeerId) && (
+                          <div className="text-center mt-4 text-sm text-muted-foreground">
+                            <p>
+                              Establishing connection with {selectedPeerName}...
+                            </p>
+                          </div>
+                        )}
+                    </div>
+                  ) : (
+                    <div className="bg-background/80 backdrop-blur-sm border border-border/50 rounded-2xl p-6 text-center">
+                      <Upload className="h-10 w-10 text-muted-foreground/50 mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground mb-3">
+                        {peers.length > 0
                           ? "Drop files anywhere or click to select"
-                          : "Scan a QR code or share the link to connect, then drop files to send"
+                          : "Scan a QR code or share the link to connect, then drop files to send"}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          document.getElementById("file-input")?.click()
                         }
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                        onClick={() => document.getElementById("file-input")?.click()}
-                  >
-                    <Upload className="h-4 w-4 mr-2" />
-                    Select Files
-                  </Button>
-                </div>
+                      >
+                        <Upload className="h-4 w-4 mr-2" />
+                        Select Files
+                      </Button>
+                    </div>
                   )}
                 </>
               )}
@@ -532,7 +598,7 @@ function AppContent() {
                     setSelectedFiles((prev) => [...prev, ...files]);
                     toast.success(
                       `${files.length} file${files.length > 1 ? "s" : ""} added`,
-                      { icon: "📁" }
+                      { icon: "📁" },
                     );
                   }
                 }}
@@ -556,14 +622,30 @@ function AppContent() {
       />
 
       {/* Sync Dialog */}
+      {/* Sync Dashboard Dialog */}
       <Dialog open={isSyncDialogOpen} onOpenChange={setIsSyncDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Folder Sync</DialogTitle>
           </DialogHeader>
-          <SyncList />
+          <SyncDashboard
+            onAddSync={() => {
+              setIsSyncDialogOpen(false);
+              setIsSyncWizardOpen(true);
+            }}
+          />
         </DialogContent>
       </Dialog>
+
+      {/* Sync Wizard */}
+      <SyncWizard
+        open={isSyncWizardOpen}
+        onOpenChange={setIsSyncWizardOpen}
+        onSuccess={() => {
+          setIsSyncWizardOpen(false);
+          setIsSyncDialogOpen(true);
+        }}
+      />
 
       <Toaster />
     </div>

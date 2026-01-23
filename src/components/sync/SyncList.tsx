@@ -3,18 +3,18 @@
  * Displays all active folder syncs
  */
 
-import { useState } from 'react';
-import { FolderPlus, Loader2 } from 'lucide-react';
-import { useFolderSync } from '@/hooks/useFolderSync';
-import { SyncItem } from './SyncItem';
-import { AddSyncDialog } from './AddSyncDialog';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { useState } from "react";
+import { FolderPlus, Loader2 } from "lucide-react";
+import { useFolderSync } from "@/hooks/useFolderSync";
+import { SyncItem } from "./SyncItem";
+import { AddSyncDialog } from "./AddSyncDialog";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 
 export function SyncList() {
   const {
     syncConfigs,
-    syncStates,
+    syncStatesArray,
     isLoading,
     error,
     performSync,
@@ -29,14 +29,14 @@ export function SyncList() {
       setSyncingConfigId(configId);
       await performSync(configId);
     } catch (err) {
-      console.error('Sync failed:', err);
+      console.error("Sync failed:", err);
     } finally {
       setSyncingConfigId(null);
     }
   };
 
   const handleDelete = async (configId: string) => {
-    if (confirm('Are you sure you want to remove this folder sync?')) {
+    if (confirm("Are you sure you want to remove this folder sync?")) {
       await deleteSync(configId);
     }
   };
@@ -84,7 +84,9 @@ export function SyncList() {
           <CardContent className="py-12">
             <div className="text-center">
               <FolderPlus className="size-12 mx-auto text-muted-foreground mb-4 opacity-50" />
-              <p className="text-muted-foreground font-medium">No folder syncs yet</p>
+              <p className="text-muted-foreground font-medium">
+                No folder syncs yet
+              </p>
               <p className="text-sm text-muted-foreground mt-1">
                 Add a folder sync to start keeping your files synchronized
               </p>
@@ -102,7 +104,8 @@ export function SyncList() {
       ) : (
         <div className="space-y-3">
           {syncConfigs.map((config) => {
-            const state = syncStates.find((s) => s.configId === config.id) || null;
+            const state =
+              syncStatesArray.find((s) => s.configId === config.id) || null;
             return (
               <SyncItem
                 key={config.id}
@@ -126,4 +129,3 @@ export function SyncList() {
     </div>
   );
 }
-

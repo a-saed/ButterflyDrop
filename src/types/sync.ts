@@ -113,3 +113,62 @@ export interface BrowserCapabilities {
   hasWebWorkers: boolean;
   isMobile: boolean;
 }
+
+/**
+ * Sync progress - real-time sync progress tracking
+ */
+export interface SyncProgress {
+  configId: string;
+  phase: "scanning" | "comparing" | "transferring" | "finalizing";
+  currentFile: string | null;
+  filesProcessed: number;
+  totalFiles: number;
+  bytesTransferred: number;
+  totalBytes: number;
+  speed: number; // bytes per second
+  eta: number; // seconds
+}
+
+/**
+ * Conflict resolution action
+ */
+export interface ConflictResolutionAction {
+  path: string;
+  action: "local" | "remote" | "both" | "manual";
+}
+
+/**
+ * Sync history entry
+ */
+export interface SyncHistoryEntry {
+  configId: string;
+  timestamp: number;
+  duration: number;
+  filesAdded: number;
+  filesModified: number;
+  filesDeleted: number;
+  bytesTransferred: number;
+  status: "success" | "error" | "cancelled";
+  error?: string;
+}
+
+/**
+ * Sync diff - comparison between local and remote snapshots
+ */
+export interface SyncDiff {
+  localOnly: FileSnapshot[]; // Files only on local
+  remoteOnly: FileSnapshot[]; // Files only on remote
+  modified: FileSnapshot[]; // Files changed on both
+  unchanged: FileSnapshot[]; // Files identical
+  conflicts: ConflictFile[]; // Files with conflicts
+}
+
+/**
+ * Sync plan - what actions to take for sync
+ */
+export interface SyncPlan {
+  upload: FileSnapshot[];
+  download: FileSnapshot[];
+  delete: FileSnapshot[];
+  conflicts: ConflictFile[];
+}
