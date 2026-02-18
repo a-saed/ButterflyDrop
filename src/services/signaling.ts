@@ -11,8 +11,10 @@ export class SignalingClient {
   private eventHandlers: Map<SignalingEventType, Set<SignalingEventHandler>> =
     new Map();
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts = 15;
   private reconnectDelay = 1000;
+  private readonly maxReconnectDelay = 8000;
+  private readonly connectTimeoutMs = 60_000;
   private url: string;
   private messageQueue: SignalingMessage[] = [];
   private isProcessingQueue = false;
@@ -30,7 +32,21 @@ export class SignalingClient {
         console.log(`🔌 Attempting WebSocket connection to: ${this.url}`);
         this.ws = new WebSocket(this.url);
 
+        // Reject if the server doesn't respond within connectTimeoutMs.
+        // This is important for cold-start scenarios: the WS handshake can
+        // hang indefinitely if the server process hasn't fully started yet.
+        const connectionTimeout = setTimeout(() => {
+          if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
+            console.warn(
+              `⏱ WebSocket connection timed out after ${this.connectTimeoutMs / 1000}s — server may still be waking up`,
+            );
+            this.ws.close();
+            reject(new Error("WebSocket connection timed out"));
+          }
+        }, this.connectTimeoutMs);
+
         this.ws.onopen = () => {
+          clearTimeout(connectionTimeout);
           console.log(`✅ WebSocket connected to: ${this.url}`);
           this.reconnectAttempts = 0;
           this.emit("open");
@@ -49,14 +65,19 @@ export class SignalingClient {
         };
 
         this.ws.onclose = (event) => {
-          console.log(`⚠️ WebSocket closed: code=${event.code}, reason=${event.reason || "none"}`);
+          console.log(
+            `⚠️ WebSocket closed: code=${event.code}, reason=${event.reason || "none"}`,
+          );
           this.emit("close");
           this.attemptReconnect();
         };
 
         this.ws.onerror = (error) => {
+          clearTimeout(connectionTimeout);
           console.error(`❌ WebSocket error connecting to ${this.url}:`, error);
-          console.error(`   Check if the signaling server is running and accessible`);
+          console.error(
+            `   Check if the signaling server is running and accessible`,
+          );
           this.emit("error", error);
           reject(error);
         };
@@ -103,7 +124,12 @@ export class SignalingClient {
         try {
           const result = handler(data);
           // If handler returns a promise, wait for it
-          if (result !== undefined && result !== null && typeof result === "object" && "then" in result) {
+          if (
+            result !== undefined &&
+            result !== null &&
+            typeof result === "object" &&
+            "then" in result
+          ) {
             await result;
           }
         } catch (error) {
@@ -119,11 +145,24 @@ export class SignalingClient {
   private attemptReconnect(): void {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
+      // Exponential back-off capped at maxReconnectDelay so we don't wait
+      // too long between retries during a cold-start (~45 s total window).
+      const delay = Math.min(
+        this.reconnectDelay * this.reconnectAttempts,
+        this.maxReconnectDelay,
+      );
+      console.log(
+        `🔄 Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms…`,
+      );
       setTimeout(() => {
         this.connect().catch(() => {
-          // Reconnection failed, will retry
+          // Reconnection failed — next attempt scheduled by onclose handler
         });
-      }, this.reconnectDelay * this.reconnectAttempts);
+      }, delay);
+    } else {
+      console.warn(
+        `❌ Gave up reconnecting after ${this.maxReconnectAttempts} attempts`,
+      );
     }
   }
 

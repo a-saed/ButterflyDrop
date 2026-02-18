@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useServerWarmup } from "@/hooks/useServerWarmup";
+import { ServerWarmupOverlay } from "@/components/connection/ServerWarmupOverlay";
 import { SessionProvider } from "@/contexts/SessionContext";
 import { ConnectionProvider } from "@/contexts/ConnectionContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
@@ -34,6 +36,11 @@ import {
 } from "@/components/ui/dialog";
 
 function AppContent() {
+  const {
+    status: warmupStatus,
+    elapsed: warmupElapsed,
+    showOverlay: showWarmupOverlay,
+  } = useServerWarmup();
   const session = useSession();
   const { joinSession } = session;
   const { peers, isScanning } = usePeerDiscovery();
@@ -401,6 +408,11 @@ function AppContent() {
   return (
     <div className="min-h-screen relative" {...getRootProps()}>
       <input {...getInputProps()} />
+
+      {/* Server Warm-up Overlay — shown only during cold-start, never for warm servers */}
+      {showWarmupOverlay && (
+        <ServerWarmupOverlay status={warmupStatus} elapsed={warmupElapsed} />
+      )}
 
       {/* Ambient Background */}
       <AmbientBackground />
