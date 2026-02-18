@@ -67,12 +67,13 @@ function AppContent() {
     sendProgress,
     sendComplete,
     sendError,
+    sendCompletePeerName,
     // Receiving state
     isReceiving,
-    receivingFromPeer,
     receiveProgress,
     receiveComplete,
     receiveError,
+    receiveCompletePeerName,
     // Incoming transfer
     incomingTransfer,
     // Received files
@@ -95,11 +96,19 @@ function AppContent() {
 
   // Track which peers have receivers set up
   const setupPeersRef = useRef<Set<string>>(new Set());
+  // Track which peers we've already shown a "connected" toast for
+  // (separate from setupPeersRef so reconnects can re-toast correctly)
+  const toastedPeersRef = useRef<Set<string>>(new Set());
+  // Track readyPeers from the previous render to detect departures
+  const previousReadyPeersRef = useRef<string[]>([]);
   // Track if we've already shown connection failed toast
   const connectionFailedToastShownRef = useRef(false);
   const previousConnectionStateRef = useRef<string | null>(null);
   // Track which sessions we've already joined (to prevent duplicate toasts)
   const joinedSessionsRef = useRef<Set<string>>(new Set());
+  // Dedup refs for error toasts — only re-toast when the message actually changes
+  const previousSendErrorRef = useRef<string | null>(null);
+  const previousReceiveErrorRef = useRef<string | null>(null);
 
   const shareableUrl = session.session
     ? createShareableUrl(session.session.id)
@@ -173,119 +182,154 @@ function AppContent() {
 
   // Track previous ready peers count for sound effects
   const previousReadyPeersCountRef = useRef(0);
+  // Gate send / receive one-shot toasts
+  const previousSendCompleteRef = useRef(false);
+  const previousReceiveCompleteRef = useRef(false);
 
-  // Show connection status when peers become ready
+  // ─── Connection status toasts ────────────────────────────────────────────
   useEffect(() => {
     const previousState = previousConnectionStateRef.current;
     previousConnectionStateRef.current = connectionState;
 
+    // Detect peers that LEFT readyPeers so we can allow re-toasting on reconnect
+    const currentSet = new Set(readyPeers);
+    previousReadyPeersRef.current.forEach((id) => {
+      if (!currentSet.has(id)) {
+        toastedPeersRef.current.delete(id);
+      }
+    });
+    previousReadyPeersRef.current = [...readyPeers];
+
     if (readyPeers.length > 0) {
+      // Only toast peers we haven't toasted yet in this session
       const newPeers = readyPeers.filter(
-        (id) => !setupPeersRef.current.has(id),
+        (id) => !toastedPeersRef.current.has(id),
       );
+
       if (newPeers.length > 0) {
         const peerNames = peers
           .filter((p) => newPeers.includes(p.id))
           .map((p) => p.name)
           .join(", ");
 
+        // Mark as toasted BEFORE firing so re-renders can't double-fire
+        newPeers.forEach((id) => toastedPeersRef.current.add(id));
+
         if (peerNames) {
           toast.success(`Connected with ${peerNames}`, {
+            // Stable ID prevents stacking duplicate toasts
+            id: `peer-connected-${newPeers.sort().join("-")}`,
             icon: "🦋",
             duration: 3000,
           });
-          // Play connection sound when new peers connect
           if (readyPeers.length > previousReadyPeersCountRef.current) {
             playConnect();
           }
         }
       }
+
       previousReadyPeersCountRef.current = readyPeers.length;
-      // Reset failed toast flag when connection succeeds
       connectionFailedToastShownRef.current = false;
     } else if (connectionState === "failed" && previousState !== "failed") {
-      // Only show toast when transitioning TO failed state, not repeatedly
       if (!connectionFailedToastShownRef.current) {
         connectionFailedToastShownRef.current = true;
+        toastedPeersRef.current.clear();
         toast.error("Connection failed", {
+          id: "connection-failed",
           description: "Check your network and try refreshing",
-          duration: 4000,
+          duration: 5000,
         });
         playError();
       }
     } else if (connectionState !== "failed") {
-      // Reset flag when connection state changes away from failed
       connectionFailedToastShownRef.current = false;
     }
   }, [connectionState, readyPeers, peers, playConnect, playError]);
 
-  // Show send errors
+  // ─── Send error toast ────────────────────────────────────────────────────
+  // Only re-fires when the error *message* changes, not on every re-render
   useEffect(() => {
-    if (sendError) {
+    if (sendError && sendError !== previousSendErrorRef.current) {
+      previousSendErrorRef.current = sendError;
       toast.error("Send failed", {
+        id: "send-error",
         description: sendError,
-        duration: 4000,
+        duration: 5000,
       });
       playError();
+    } else if (!sendError) {
+      previousSendErrorRef.current = null;
+      toast.dismiss("send-error");
     }
   }, [sendError, playError]);
 
-  // Show receive errors
+  // ─── Receive error toast ─────────────────────────────────────────────────
   useEffect(() => {
-    if (receiveError) {
+    if (receiveError && receiveError !== previousReceiveErrorRef.current) {
+      previousReceiveErrorRef.current = receiveError;
       toast.error("Receive failed", {
+        id: "receive-error",
         description: receiveError,
-        duration: 4000,
+        duration: 5000,
       });
       playError();
+    } else if (!receiveError) {
+      previousReceiveErrorRef.current = null;
+      toast.dismiss("receive-error");
     }
   }, [receiveError, playError]);
 
-  // Track previous send complete state for sound effects
-  const previousSendCompleteRef = useRef(false);
-  const previousReceiveCompleteRef = useRef(false);
-
-  // Show send complete notification and play sound
+  // ─── Send complete toast ─────────────────────────────────────────────────
+  // Fires exactly once per transfer; resets when sendComplete goes false
   useEffect(() => {
     if (sendComplete && !previousSendCompleteRef.current) {
-      playSuccess();
       previousSendCompleteRef.current = true;
+      playSuccess();
+      const peerName = sendCompletePeerName || "peer";
+      toast.success(`Files sent to ${peerName}!`, {
+        id: "send-complete",
+        icon: "🦋",
+        duration: 4000,
+      });
     } else if (!sendComplete) {
       previousSendCompleteRef.current = false;
     }
-  }, [sendComplete, playSuccess]);
+  }, [sendComplete, sendCompletePeerName, playSuccess]);
 
-  // Show receive complete notification
+  // ─── Receive complete toast ──────────────────────────────────────────────
+  // THE FIX: gate the toast AND the sound behind the ref so that any
+  // subsequent re-renders while receiveComplete is still true (common on
+  // mobile due to peer-list churn) cannot fire another toast.
   useEffect(() => {
-    if (receiveComplete && receivedFiles.length > 0) {
-      const peerName =
-        incomingTransfer?.peerName ||
-        (receivingFromPeer
-          ? peers.find((p) => p.id === receivingFromPeer)?.name
-          : null) ||
-        "peer";
+    if (
+      receiveComplete &&
+      receivedFiles.length > 0 &&
+      !previousReceiveCompleteRef.current
+    ) {
+      // Set guard FIRST — before any async work
+      previousReceiveCompleteRef.current = true;
+
+      const fileCount = receivedFiles.length;
+      const peerName = receiveCompletePeerName || "peer";
+
       toast.success(
-        `${receivedFiles.length} file${receivedFiles.length > 1 ? "s" : ""} received from ${peerName}!`,
+        `${fileCount} file${fileCount > 1 ? "s" : ""} received from ${peerName}!`,
         {
+          id: "receive-complete",
           icon: "✅",
-          description: "Click to download",
-          duration: 5000,
+          description: "Tap below to download",
+          duration: 6000,
         },
       );
-      // Play file received sound
-      if (!previousReceiveCompleteRef.current) {
-        playFileReceived();
-        previousReceiveCompleteRef.current = true;
-      }
+      playFileReceived();
     } else if (!receiveComplete) {
       previousReceiveCompleteRef.current = false;
+      toast.dismiss("receive-complete");
     }
   }, [
     receiveComplete,
     receivedFiles.length,
-    incomingTransfer,
-    receivingFromPeer,
-    peers,
+    receiveCompletePeerName,
     playFileReceived,
   ]);
 
