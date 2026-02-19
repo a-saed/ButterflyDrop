@@ -11,22 +11,65 @@ import {
 import type { SignalingMessage } from "@/types/webrtc";
 import { SIGNALING_URL } from "@/lib/signalingConfig";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface PeerConnectionState {
   pc: RTCPeerConnection;
   dataChannel: RTCDataChannel | null;
   isConnected: boolean;
   isOfferer: boolean;
   iceCandidateQueue: RTCIceCandidateInit[];
-  // Queue messages that arrive before handler is set up
+  /** Messages buffered before the app-level handler is registered. */
   messageQueue: MessageEvent[];
   hasMessageHandler: boolean;
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Returns true when the connection is fully established and healthy. */
+function isConnectionHealthy(state: PeerConnectionState): boolean {
+  const { pc } = state;
+  return (
+    (pc.connectionState === "connected" ||
+      pc.iceConnectionState === "connected" ||
+      pc.iceConnectionState === "completed") &&
+    state.dataChannel?.readyState === "open"
+  );
+}
+
 /**
- * Snapdrop-style WebRTC hook
- * - Auto-establishes connections when peers join
- * - Keeps connections ready for instant file transfer
- * - No waiting when user clicks "Send"
+ * Returns true when a connection exists in the map but is clearly broken and
+ * should be torn down and re-established.
+ */
+function isConnectionBroken(state: PeerConnectionState): boolean {
+  const { pc } = state;
+  return (
+    pc.connectionState === "failed" ||
+    pc.connectionState === "closed" ||
+    pc.iceConnectionState === "failed" ||
+    pc.iceConnectionState === "closed"
+  );
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
+/**
+ * useWebRTC
+ *
+ * Manages the full WebRTC lifecycle:
+ *  - Connects to the signaling server and joins the session
+ *  - Auto-establishes peer connections when remote peers appear
+ *  - Implements the "perfect negotiation" pattern to handle offer glare
+ *  - Debounces transient ICE "disconnected" events (5 s grace) so the UI
+ *    doesn't flicker yellow during brief network hiccups
+ *  - Falls back to self-initiation when the "polite" peer hasn't received an
+ *    offer within 6 s (covers the case where the first message was lost)
+ *  - Runs a periodic health scan every 30 s to re-initiate broken connections
+ *  - Cleans up all resources deterministically when the session ends
+ *
+ * ⚠️  This hook must be instantiated exactly ONCE via <WebRTCProvider>.
+ *     Do NOT call useWebRTC() directly in components or other hooks — use
+ *     useWebRTCContext() instead to share the single instance.
  */
 export function useWebRTC() {
   const {
@@ -37,32 +80,63 @@ export function useWebRTC() {
   } = useSession();
   const { setConnectionState, setError: setConnectionError } = useConnection();
 
-  // Map of peer ID -> peer connection state
+  // ─── Refs ───────────────────────────────────────────────────────────────────
+
+  /** Map of peerId → per-peer WebRTC state. */
   const peerConnectionsRef = useRef<Map<string, PeerConnectionState>>(
     new Map(),
   );
   const [readyPeers, setReadyPeers] = useState<Set<string>>(new Set());
 
   const signalingRef = useRef<SignalingClient | null>(null);
+
+  // Stable device identity — generated/retrieved from localStorage once.
   const peerIdRef = useRef<string>(generatePeerId());
   const deviceNameRef = useRef<string>(getDeviceName());
   const deviceTypeRef = useRef<string>(detectDeviceType());
+
+  /** Prevents initialize() from running more than once per session. */
   const hasInitializedRef = useRef(false);
+  /**
+   * Tracks the last session ID we acted on so the main useEffect only fires
+   * when the *value* of the session ID changes, not when the session object
+   * reference is replaced.
+   */
   const previousSessionIdRef = useRef<string | null>(null);
-  // Ref to store reconnection callback to avoid circular dependencies
+
+  /**
+   * Ref-stored callback for reconnecting to a peer.
+   * Stored as a ref to break the circular dep:
+   *   initiateConnectionToPeer → handlePeerListUpdate → initiateConnectionToPeer
+   */
   const reconnectPeerRef = useRef<((peerId: string) => void) | null>(null);
 
   /**
-   * Create peer connection for a specific peer
+   * Per-peer timers that cancel a polite-peer fallback initiation if the
+   * expected offer arrives before the timeout fires.
    */
+  const politeTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+
+  /**
+   * Per-peer timers that debounce the ICE "disconnected" → readyPeers removal.
+   * ICE "disconnected" is transient and often self-heals within a few seconds,
+   * so we wait 5 s before actually marking the peer as not-ready.
+   */
+  const iceDisconnectTimersRef = useRef<
+    Map<string, ReturnType<typeof setTimeout>>
+  >(new Map());
+
+  /** Handle for the 30-second periodic health-scan interval. */
+  const healthScanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+
+  // ─── createPeerConnectionForPeer ────────────────────────────────────────────
+
   const createPeerConnectionForPeer = useCallback(
     (peerId: string, isOfferer: boolean): PeerConnectionState => {
-      console.log(
-        `🔗 Creating peer connection for ${peerId} (${
-          isOfferer ? "offerer" : "answerer"
-        })`,
-      );
-
       const pc = createPeerConnection();
       const state: PeerConnectionState = {
         pc,
@@ -74,57 +148,34 @@ export function useWebRTC() {
         hasMessageHandler: false,
       };
 
-      console.log(
-        `   📊 Peer connection state created for ${peerId} (${
-          isOfferer ? "offerer" : "answerer"
-        })`,
-      );
-
-      // Handle ICE candidates
+      // ── ICE candidate forwarding ─────────────────────────────────────────
       pc.onicecandidate = (event) => {
         if (event.candidate && signalingRef.current && session) {
-          console.log(
-            `🧊 Sending ICE candidate to peer ${peerId} (${event.candidate.type})`,
-          );
           signalingRef.current.send({
             type: "ice-candidate",
             sessionId: session.id,
-            peerId: peerId,
+            peerId,
             data: event.candidate,
           });
-        } else if (!event.candidate) {
-          console.log(`🧊 ICE gathering complete for ${peerId}`);
         }
       };
 
-      // Handle connection state changes (complementary to ICE state)
+      // ── Connection state ─────────────────────────────────────────────────
+      // We use onconnectionstatechange as the primary signal for DTLS/SCTP
+      // connection health, and oniceconnectionstatechange for ICE-level events.
       pc.onconnectionstatechange = () => {
         const connState = pc.connectionState;
-        console.log(`🔗 Connection state with ${peerId}: ${connState}`);
 
         if (connState === "connected") {
+          // Cancel any pending ICE-disconnect debounce timer — we're back
+          const timer = iceDisconnectTimersRef.current.get(peerId);
+          if (timer !== undefined) {
+            clearTimeout(timer);
+            iceDisconnectTimersRef.current.delete(peerId);
+          }
           state.isConnected = true;
           setReadyPeers((prev) => new Set(prev).add(peerId));
-          console.log(`✅ WebRTC connection ready with ${peerId}`);
-        } else if (connState === "connecting") {
-          // Still connecting - don't remove from ready peers yet
-          console.log(`🔄 Still connecting to ${peerId}...`);
-        } else if (connState === "disconnected") {
-          // Temporary disconnection
-          console.log(
-            `⚠️ Connection disconnected with ${peerId} - waiting for reconnect...`,
-          );
-          state.isConnected = false;
-          setReadyPeers((prev) => {
-            const next = new Set(prev);
-            next.delete(peerId);
-            return next;
-          });
-        } else if (connState === "failed") {
-          // Connection failed - attempt reconnection
-          console.log(
-            `❌ Connection failed with ${peerId} - attempting reconnection...`,
-          );
+        } else if (connState === "failed" || connState === "closed") {
           state.isConnected = false;
           setReadyPeers((prev) => {
             const next = new Set(prev);
@@ -132,57 +183,59 @@ export function useWebRTC() {
             return next;
           });
 
-          // Attempt to reconnect after a delay
-          setTimeout(() => {
-            const currentState = peerConnectionsRef.current.get(peerId);
-            if (currentState && currentState.pc.connectionState === "failed") {
-              console.log(`🔄 Re-initiating connection to ${peerId}...`);
-              // Re-initiate connection using ref to avoid circular dependency
-              if (reconnectPeerRef.current) {
-                reconnectPeerRef.current(peerId);
+          if (connState === "failed") {
+            // Schedule a reconnect attempt after a short back-off
+            setTimeout(() => {
+              const current = peerConnectionsRef.current.get(peerId);
+              if (current?.pc.connectionState === "failed") {
+                reconnectPeerRef.current?.(peerId);
               }
-            }
-          }, 3000);
-        } else if (connState === "closed") {
-          // Connection closed - cleanup
-          console.log(`🔒 Connection closed with ${peerId}`);
-          state.isConnected = false;
-          setReadyPeers((prev) => {
-            const next = new Set(prev);
-            next.delete(peerId);
-            return next;
-          });
+            }, 3_000);
+          }
         }
+        // "connecting" / "disconnected" — let ICE state machine handle it
       };
 
-      // Handle ICE connection state - critical for mobile stability
+      // ── ICE connection state ─────────────────────────────────────────────
       pc.oniceconnectionstatechange = () => {
         const iceState = pc.iceConnectionState;
-        console.log(`🧊 ICE connection state with ${peerId}: ${iceState}`);
 
-        // Handle different ICE states
         if (iceState === "connected" || iceState === "completed") {
-          // Connection is good
+          // Cancel any pending disconnect debounce
+          const timer = iceDisconnectTimersRef.current.get(peerId);
+          if (timer !== undefined) {
+            clearTimeout(timer);
+            iceDisconnectTimersRef.current.delete(peerId);
+          }
           state.isConnected = true;
           setReadyPeers((prev) => new Set(prev).add(peerId));
-          console.log(`✅ ICE connection established with ${peerId}`);
         } else if (iceState === "disconnected") {
-          // Temporary disconnection (common on mobile when screen turns off)
-          console.log(
-            `⚠️ ICE disconnected with ${peerId} - may reconnect automatically`,
-          );
-          state.isConnected = false;
-          setReadyPeers((prev) => {
-            const next = new Set(prev);
-            next.delete(peerId);
-            return next;
-          });
-          // Don't destroy connection yet - wait for reconnect or failure
+          // ── Debounced removal ────────────────────────────────────────────
+          // "disconnected" is transient on mobile (screen lock, brief network
+          // drop, Wi-Fi roam).  Give ICE 5 s to self-heal before removing
+          // the peer from readyPeers, preventing the false yellow-spinner flash.
+          if (!iceDisconnectTimersRef.current.has(peerId)) {
+            const timer = setTimeout(() => {
+              iceDisconnectTimersRef.current.delete(peerId);
+              const current = peerConnectionsRef.current.get(peerId);
+              if (current?.pc.iceConnectionState === "disconnected") {
+                state.isConnected = false;
+                setReadyPeers((prev) => {
+                  const next = new Set(prev);
+                  next.delete(peerId);
+                  return next;
+                });
+              }
+            }, 5_000);
+            iceDisconnectTimersRef.current.set(peerId, timer);
+          }
         } else if (iceState === "failed") {
-          // Connection failed - attempt reconnection
-          console.log(
-            `❌ ICE connection failed with ${peerId} - attempting reconnection...`,
-          );
+          // Clear any disconnect debounce — it's definitely gone now
+          const timer = iceDisconnectTimersRef.current.get(peerId);
+          if (timer !== undefined) {
+            clearTimeout(timer);
+            iceDisconnectTimersRef.current.delete(peerId);
+          }
           state.isConnected = false;
           setReadyPeers((prev) => {
             const next = new Set(prev);
@@ -190,23 +243,19 @@ export function useWebRTC() {
             return next;
           });
 
-          // Attempt to reconnect after a delay
+          // Attempt ICE restart before a full teardown
           setTimeout(() => {
-            const currentState = peerConnectionsRef.current.get(peerId);
-            if (
-              currentState &&
-              currentState.pc.iceConnectionState === "failed"
-            ) {
-              console.log(`🔄 Attempting to reconnect to ${peerId}...`);
-              // Re-initiate connection using ref to avoid circular dependency
-              if (reconnectPeerRef.current) {
-                reconnectPeerRef.current(peerId);
-              }
+            const current = peerConnectionsRef.current.get(peerId);
+            if (current?.pc.iceConnectionState === "failed") {
+              reconnectPeerRef.current?.(peerId);
             }
-          }, 2000);
+          }, 2_000);
         } else if (iceState === "closed") {
-          // Connection closed - cleanup
-          console.log(`🔒 ICE connection closed with ${peerId}`);
+          const timer = iceDisconnectTimersRef.current.get(peerId);
+          if (timer !== undefined) {
+            clearTimeout(timer);
+            iceDisconnectTimersRef.current.delete(peerId);
+          }
           state.isConnected = false;
           setReadyPeers((prev) => {
             const next = new Set(prev);
@@ -216,22 +265,16 @@ export function useWebRTC() {
         }
       };
 
-      // Helper to setup data channel handlers
-      const setupDataChannelHandlers = (
-        channel: RTCDataChannel,
-        role: string,
-      ) => {
-        // CRITICAL: Set binaryType to arraybuffer for proper binary data handling
+      // ── Data channel setup ───────────────────────────────────────────────
+      const setupDataChannelHandlers = (channel: RTCDataChannel) => {
         channel.binaryType = "arraybuffer";
 
         channel.onopen = () => {
-          console.log(`✅ Data channel opened with ${peerId} (${role})`);
           state.isConnected = true;
           setReadyPeers((prev) => new Set(prev).add(peerId));
         };
 
         channel.onclose = () => {
-          console.log(`❌ Data channel closed with ${peerId}`);
           state.isConnected = false;
           setReadyPeers((prev) => {
             const next = new Set(prev);
@@ -241,36 +284,27 @@ export function useWebRTC() {
         };
 
         channel.onerror = (error) => {
-          console.error(`❌ Data channel error with ${peerId}:`, error);
+          console.error(`Data channel error with ${peerId}:`, error);
         };
 
-        // Queue messages until a proper handler is set up
-        // This prevents losing messages that arrive before setupReceiver is called
+        // Buffer messages until the app-level handler (setupReceiver) installs
+        // its own onmessage — avoids losing the first chunk of a transfer.
         channel.onmessage = (event) => {
-          if (state.hasMessageHandler) {
-            // Handler will be replaced by setupReceiver, this shouldn't run
-            console.log(`⚠️ Message received but handler should be replaced`);
-          } else {
-            console.log(
-              `📬 Queueing message for ${peerId} (handler not ready yet)`,
-            );
+          if (!state.hasMessageHandler) {
             state.messageQueue.push(event);
           }
         };
       };
 
-      // If we're the offerer, create data channel immediately
       if (isOfferer) {
         const channel = createDataChannel(pc, "file-transfer");
         state.dataChannel = channel;
-        setupDataChannelHandlers(channel, "offerer");
+        setupDataChannelHandlers(channel);
       } else {
-        // If we're the answerer, wait for data channel from peer
         pc.ondatachannel = (event) => {
-          console.log(`📡 Received data channel from ${peerId}`);
           const channel = event.channel;
           state.dataChannel = channel;
-          setupDataChannelHandlers(channel, "answerer");
+          setupDataChannelHandlers(channel);
         };
       }
 
@@ -280,232 +314,216 @@ export function useWebRTC() {
     [session],
   );
 
+  // ─── initiateConnectionToPeer ────────────────────────────────────────────────
+
   /**
-   * Initiate connection to a peer (create offer)
+   * Creates an RTCPeerConnection for `peerId` as the offerer, creates and
+   * sends an SDP offer via the signaling server.
+   *
+   * Idempotent — skips silently if a healthy connection already exists.
+   * Tears down any unhealthy connection in the map before proceeding.
    */
   const initiateConnectionToPeer = useCallback(
     (peerId: string) => {
       if (!session || !signalingRef.current) {
-        console.error(
-          "❌ Cannot initiate connection: no session or signaling",
-          {
-            hasSession: !!session,
-            hasSignaling: !!signalingRef.current,
-          },
-        );
+        console.error("Cannot initiate connection: no session or signaling");
         return;
       }
 
-      // Check if already connected and healthy
+      // ── Skip if already healthy ──────────────────────────────────────────
       const existingState = peerConnectionsRef.current.get(peerId);
       if (existingState) {
-        const pc = existingState.pc;
-        const isHealthy =
-          pc.connectionState === "connected" &&
-          (pc.iceConnectionState === "connected" ||
-            pc.iceConnectionState === "completed");
+        if (isConnectionHealthy(existingState)) return;
 
-        if (isHealthy) {
-          console.log(
-            `   ✅ Already have healthy connection to ${peerId}, skipping`,
-          );
-          return;
-        } else {
-          console.log(
-            `   ⚠️ Existing connection to ${peerId} is unhealthy (${pc.connectionState}/${pc.iceConnectionState}), cleaning up...`,
-          );
-          // Clean up unhealthy connection
-          if (existingState.dataChannel) {
-            existingState.dataChannel.close();
-          }
-          pc.close();
-          peerConnectionsRef.current.delete(peerId);
-          setReadyPeers((prev) => {
-            const next = new Set(prev);
-            next.delete(peerId);
-            return next;
-          });
-        }
+        // Tear down the broken connection before creating a fresh one
+        existingState.dataChannel?.close();
+        existingState.pc.close();
+        peerConnectionsRef.current.delete(peerId);
+        setReadyPeers((prev) => {
+          const next = new Set(prev);
+          next.delete(peerId);
+          return next;
+        });
       }
 
-      console.log(`🚀 Initiating connection to peer ${peerId}`);
-
-      // Create peer connection as offerer
       const state = createPeerConnectionForPeer(peerId, true);
 
-      // Create and send offer
       state.pc
         .createOffer()
-        .then((offer) => {
-          console.log(`   📝 Created offer for ${peerId}`);
-          return state.pc.setLocalDescription(offer);
-        })
+        .then((offer) => state.pc.setLocalDescription(offer))
         .then(() => {
-          console.log(`   ✅ Local description set (offer)`);
           const localDescription = state.pc.localDescription;
-          if (!localDescription) {
-            throw new Error(
-              "Local description is null after setLocalDescription",
-            );
-          }
-          console.log(`📤 Sending offer to peer ${peerId}`);
+          if (!localDescription) throw new Error("localDescription is null");
+
           signalingRef.current!.send({
             type: "offer",
             sessionId: session!.id,
-            peerId: peerId,
+            peerId,
             data: localDescription,
           });
-          console.log(`   ✅ Offer sent successfully`);
         })
         .catch((error) => {
-          console.error(`❌ Failed to create/send offer for ${peerId}:`, error);
+          console.error(`Failed to create/send offer to ${peerId}:`, error);
           peerConnectionsRef.current.delete(peerId);
         });
     },
     [session, createPeerConnectionForPeer],
   );
 
+  // ─── handleOffer — perfect negotiation ──────────────────────────────────────
+
   /**
-   * Handle incoming offer from a peer
+   * Handles an incoming SDP offer using the "perfect negotiation" pattern:
+   *
+   *  - The "polite" peer (higher string ID) is willing to roll back its own
+   *    pending offer and accept the incoming one.
+   *  - The "impolite" peer (lower string ID) ignores incoming offers when it
+   *    already has one in flight (collision → impolite side wins).
+   *
+   * This eliminates glare without any external coordination.
    */
   const handleOffer = useCallback(
     async (peerId: string, offer: RTCSessionDescriptionInit) => {
       if (!session || !signalingRef.current) {
-        console.error("❌ Cannot handle offer: no session or signaling");
+        console.error("Cannot handle offer: no session or signaling");
         return;
       }
 
-      console.log(`📥 Received offer from peer ${peerId}`);
+      // Cancel the polite-peer fallback timeout if it's pending — the remote
+      // side did send us an offer, so we no longer need to self-initiate.
+      const politeTimer = politeTimeoutsRef.current.get(peerId);
+      if (politeTimer !== undefined) {
+        clearTimeout(politeTimer);
+        politeTimeoutsRef.current.delete(peerId);
+      }
 
-      // Create peer connection as answerer
-      const state = createPeerConnectionForPeer(peerId, false);
+      // Perfect negotiation: are we the "polite" peer for this pair?
+      const myId = peerIdRef.current;
+      const isPolite = myId > peerId;
+
+      let state = peerConnectionsRef.current.get(peerId);
+
+      // Detect offer collision (glare): we have a pending offer of our own
+      const offerCollision =
+        offer.type === "offer" &&
+        state &&
+        (state.pc.signalingState !== "stable" || state.isOfferer);
+
+      if (offerCollision) {
+        if (!isPolite) {
+          // Impolite: our offer wins — discard the incoming offer
+          return;
+        }
+        // Polite: roll back our pending offer so we can accept theirs
+        try {
+          await state!.pc.setLocalDescription({ type: "rollback" });
+        } catch {
+          // Some browsers don't support explicit rollback; tear down and redo
+          state!.dataChannel?.close();
+          state!.pc.close();
+          peerConnectionsRef.current.delete(peerId);
+          state = undefined;
+        }
+      }
+
+      // Create the peer connection (as answerer) if it doesn't exist yet
+      if (!state) {
+        state = createPeerConnectionForPeer(peerId, false);
+      }
 
       try {
-        // Set remote description
         await state.pc.setRemoteDescription(new RTCSessionDescription(offer));
-        console.log(`✅ Remote description set for ${peerId}`);
 
-        // Process queued ICE candidates
-        if (state.iceCandidateQueue.length > 0) {
-          console.log(
-            `🧊 Processing ${state.iceCandidateQueue.length} queued ICE candidates for ${peerId}`,
-          );
-          for (const candidate of state.iceCandidateQueue) {
-            try {
-              await state.pc.addIceCandidate(new RTCIceCandidate(candidate));
-            } catch (error) {
-              console.error(
-                `❌ Failed to add queued ICE candidate for ${peerId}:`,
-                error,
-              );
-            }
-          }
-          state.iceCandidateQueue = [];
+        // Flush any ICE candidates that arrived before the remote description
+        for (const candidate of state.iceCandidateQueue) {
+          await state.pc
+            .addIceCandidate(new RTCIceCandidate(candidate))
+            .catch(() => {});
         }
+        state.iceCandidateQueue = [];
 
-        // Create and send answer
         const answer = await state.pc.createAnswer();
         await state.pc.setLocalDescription(answer);
 
-        console.log(`📤 Sending answer to peer ${peerId}`);
         signalingRef.current.send({
           type: "answer",
           sessionId: session.id,
-          peerId: peerId,
+          peerId,
           data: answer,
         });
       } catch (error) {
-        console.error(`❌ Failed to handle offer from ${peerId}:`, error);
+        console.error(`Failed to handle offer from ${peerId}:`, error);
         peerConnectionsRef.current.delete(peerId);
       }
     },
     [session, createPeerConnectionForPeer],
   );
 
-  /**
-   * Handle incoming answer from a peer
-   */
+  // ─── handleAnswer ────────────────────────────────────────────────────────────
+
   const handleAnswer = useCallback(
     async (peerId: string, answer: RTCSessionDescriptionInit) => {
-      console.log(`📥 Received answer from peer ${peerId}`);
-
       const state = peerConnectionsRef.current.get(peerId);
-      if (!state) {
-        console.error(
-          `❌ No peer connection state found for ${peerId} when handling answer`,
-        );
-        return;
-      }
+      if (!state) return;
+
+      // Guard against stale answers (e.g. from a previous negotiation round)
+      if (state.pc.signalingState !== "have-local-offer") return;
 
       try {
         await state.pc.setRemoteDescription(new RTCSessionDescription(answer));
-        console.log(`✅ Remote description set for ${peerId}`);
 
-        // Process queued ICE candidates
-        if (state.iceCandidateQueue.length > 0) {
-          console.log(
-            `🧊 Processing ${state.iceCandidateQueue.length} queued ICE candidates for ${peerId}`,
-          );
-          for (const candidate of state.iceCandidateQueue) {
-            try {
-              await state.pc.addIceCandidate(new RTCIceCandidate(candidate));
-            } catch (error) {
-              console.error(
-                `❌ Failed to add queued ICE candidate for ${peerId}:`,
-                error,
-              );
-            }
-          }
-          state.iceCandidateQueue = [];
+        // Flush queued ICE candidates
+        for (const candidate of state.iceCandidateQueue) {
+          await state.pc
+            .addIceCandidate(new RTCIceCandidate(candidate))
+            .catch(() => {});
         }
+        state.iceCandidateQueue = [];
       } catch (error) {
-        console.error(`❌ Failed to handle answer from ${peerId}:`, error);
+        console.error(`Failed to handle answer from ${peerId}:`, error);
       }
     },
     [],
   );
 
-  /**
-   * Handle incoming ICE candidate from a peer
-   */
+  // ─── handleIceCandidate ──────────────────────────────────────────────────────
+
   const handleIceCandidate = useCallback(
     async (peerId: string, candidate: RTCIceCandidateInit) => {
-      console.log(`🧊 Received ICE candidate from peer ${peerId}`);
-
       const state = peerConnectionsRef.current.get(peerId);
-      if (!state) {
-        console.warn(
-          `⚠️ No peer connection found for ${peerId}, ignoring ICE candidate`,
-        );
-        return;
-      }
+      if (!state) return;
 
       if (state.pc.remoteDescription) {
-        try {
-          await state.pc.addIceCandidate(new RTCIceCandidate(candidate));
-          console.log(`✅ Added ICE candidate for ${peerId}`);
-        } catch (error) {
-          console.error(`❌ Failed to add ICE candidate for ${peerId}:`, error);
-        }
+        await state.pc
+          .addIceCandidate(new RTCIceCandidate(candidate))
+          .catch((err) =>
+            console.error(`Failed to add ICE candidate for ${peerId}:`, err),
+          );
       } else {
-        console.log(
-          `🧊 Queueing ICE candidate for ${peerId} (no remote description yet)`,
-        );
+        // Queue until setRemoteDescription is called
         state.iceCandidateQueue.push(candidate);
       }
     },
     [],
   );
 
+  // ─── handlePeerListUpdate ────────────────────────────────────────────────────
+
   /**
-   * Handle peer list updates - auto-establish connections with new peers
-   * Simplified: Both sides always try to connect (polite/impolite pattern)
+   * Called whenever the signaling server sends a peer-list or session-join.
+   *
+   * For each remote peer:
+   *  1. If a healthy connection exists → do nothing.
+   *  2. If a broken connection exists → tear it down and re-initiate.
+   *  3. If no connection exists:
+   *     - Impolite peer (lower ID) → initiate immediately.
+   *     - Polite peer   (higher ID) → wait 6 s for the remote offer, then
+   *       self-initiate as a fallback (handles lost messages / asymmetric joins).
    */
   const handlePeerListUpdate = useCallback(
     (peers: Array<{ id: string; name: string; deviceType: string }>) => {
       const myId = peerIdRef.current;
 
-      // Filter out self and add isOnline property
       const otherPeers = peers
         .filter((peer) => peer.id !== myId)
         .map((peer) => ({
@@ -515,106 +533,97 @@ export function useWebRTC() {
           isOnline: true,
         }));
 
-      if (otherPeers.length === 0) {
-        setPeers(otherPeers);
-        return;
-      }
+      // Update the session peer list regardless of connection state
+      setPeers(otherPeers);
 
-      // For each peer, establish connection if we don't have one yet
-      // Simplified approach: Both sides initiate, we handle collisions gracefully
+      if (otherPeers.length === 0) return;
+
       otherPeers.forEach((peer) => {
-        const alreadyConnected = peerConnectionsRef.current.has(peer.id);
+        const existingState = peerConnectionsRef.current.get(peer.id);
 
-        if (!alreadyConnected) {
-          // Determine if we're "polite" (higher ID = polite, waits for offers)
-          // or "impolite" (lower ID = impolite, sends offers immediately)
-          const isPolite = myId > peer.id;
-
-          if (!isPolite) {
-            // Impolite peer initiates immediately
-            if (!peerConnectionsRef.current.has(peer.id)) {
-              initiateConnectionToPeer(peer.id);
-            }
+        if (existingState) {
+          if (isConnectionHealthy(existingState)) {
+            // Already good — nothing to do
+            return;
           }
-          // Polite peer waits for the remote offer to arrive via signaling
+          if (isConnectionBroken(existingState)) {
+            // Broken — tear down and fall through to reconnect
+            existingState.dataChannel?.close();
+            existingState.pc.close();
+            peerConnectionsRef.current.delete(peer.id);
+            setReadyPeers((prev) => {
+              const next = new Set(prev);
+              next.delete(peer.id);
+              return next;
+            });
+            // fall through to the "new peer" logic below
+          } else {
+            // Mid-negotiation (connecting/checking) — leave it alone
+            return;
+          }
+        }
+
+        // ── New (or freshly cleaned) peer ──────────────────────────────────
+        const isPolite = myId > peer.id;
+
+        if (!isPolite) {
+          // Impolite: send the offer right away
+          initiateConnectionToPeer(peer.id);
+        } else {
+          // Polite: give the remote side 6 s to send us an offer first.
+          // If it doesn't arrive (lost message, asymmetric join, etc.) we
+          // self-initiate as a fallback so we're never stuck waiting forever.
+          if (!politeTimeoutsRef.current.has(peer.id)) {
+            const timer = setTimeout(() => {
+              politeTimeoutsRef.current.delete(peer.id);
+              // Only self-initiate if we still don't have a connection
+              if (!peerConnectionsRef.current.has(peer.id)) {
+                initiateConnectionToPeer(peer.id);
+              }
+            }, 6_000);
+            politeTimeoutsRef.current.set(peer.id, timer);
+          }
         }
       });
-
-      // Update session peers
-      setPeers(otherPeers);
     },
-    [session, setPeers, initiateConnectionToPeer],
+    [setPeers, initiateConnectionToPeer],
   );
 
-  /**
-   * Get data channel for a specific peer (for file transfer)
-   */
+  // ─── Public accessors ────────────────────────────────────────────────────────
+
   const getDataChannelForPeer = useCallback(
     (peerId: string): RTCDataChannel | null => {
       const state = peerConnectionsRef.current.get(peerId);
-      if (!state) {
-        console.error(`❌ No connection found for peer ${peerId}`);
+      if (!state?.dataChannel || state.dataChannel.readyState !== "open") {
         return null;
       }
-
-      if (!state.dataChannel || state.dataChannel.readyState !== "open") {
-        console.error(
-          `❌ Data channel not ready for peer ${peerId} (state: ${state.dataChannel?.readyState})`,
-        );
-        return null;
-      }
-
       return state.dataChannel;
     },
     [],
   );
 
-  /**
-   * Get queued messages for a peer and mark that handler is installed
-   * This should be called when setting up the message handler
-   */
   const getQueuedMessagesForPeer = useCallback(
     (peerId: string): MessageEvent[] => {
       const state = peerConnectionsRef.current.get(peerId);
-      if (!state) {
-        return [];
-      }
+      if (!state) return [];
 
-      // Mark that a proper handler is now installed
       state.hasMessageHandler = true;
-
-      // Return and clear the queue
       const messages = [...state.messageQueue];
       state.messageQueue = [];
-
-      if (messages.length > 0) {
-        console.log(
-          `📬 Returning ${messages.length} queued messages for ${peerId}`,
-        );
-      }
-
       return messages;
     },
     [],
   );
 
-  /**
-   * Check if peer is ready for file transfer
-   */
   const isPeerReady = useCallback(
-    (peerId: string): boolean => {
-      return readyPeers.has(peerId);
-    },
+    (peerId: string): boolean => readyPeers.has(peerId),
     [readyPeers],
   );
 
-  /**
-   * Initialize signaling and join network
-   */
+  // ─── initialize ──────────────────────────────────────────────────────────────
+
   const initialize = useCallback(async () => {
-    if (!session || hasInitializedRef.current) {
-      return;
-    }
+    if (!session || hasInitializedRef.current) return;
 
     hasInitializedRef.current = true;
     const myId = peerIdRef.current;
@@ -622,52 +631,50 @@ export function useWebRTC() {
     try {
       setConnectionState("connecting");
 
-      // CRITICAL: Store my peer ID FIRST before any async operations
-      // This ensures SessionContext has myPeerId before peer list arrives
+      // Register our peer ID with the session context *before* the first
+      // async operation so it's available when the peer-list arrives.
       setMyPeerId(myId);
 
-      // Small delay to ensure state update propagates
+      // Tiny yield so the state update above can propagate before we send
+      // the session-join (avoids a "myPeerId not set yet" warning).
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      // Connect to signaling server
+      // ── Connect to signaling server ──────────────────────────────────────
       const signaling = new SignalingClient(SIGNALING_URL);
       signalingRef.current = signaling;
 
       try {
         await signaling.connect();
       } catch (error) {
-        console.error("❌ Failed to connect to signaling server:", error);
-        throw error; // Re-throw to be caught by outer try-catch
+        console.error("Failed to connect to signaling server:", error);
+        throw error;
       }
 
-      // Join the session
-      signaling.send({
-        type: "session-join",
-        sessionId: session.id,
-        peerId: myId,
-        peerName: deviceNameRef.current,
-        deviceType: deviceTypeRef.current,
+      // ── Join the session ─────────────────────────────────────────────────
+      const sendJoin = () => {
+        signaling.send({
+          type: "session-join",
+          sessionId: session.id,
+          peerId: myId,
+          peerName: deviceNameRef.current,
+          deviceType: deviceTypeRef.current,
+        });
+      };
+
+      sendJoin();
+
+      // Re-join after every signaling reconnect (the server forgets sessions
+      // on restart; re-joining puts us back in the peer list).
+      signaling.on("open", () => {
+        sendJoin();
+        setConnectionState("connecting");
       });
 
-      // Handle signaling server reconnection
       signaling.on("close", () => {
         setConnectionState("connecting");
       });
 
-      signaling.on("open", () => {
-        // Rejoin session if we were already in one
-        if (session && peerIdRef.current) {
-          signaling.send({
-            type: "session-join",
-            sessionId: session.id,
-            peerId: peerIdRef.current,
-            peerName: deviceNameRef.current,
-            deviceType: deviceTypeRef.current,
-          });
-        }
-      });
-
-      // Handle signaling messages
+      // ── Signaling message dispatcher ─────────────────────────────────────
       signaling.on("message", async (data: unknown) => {
         const message = data as SignalingMessage;
 
@@ -702,10 +709,23 @@ export function useWebRTC() {
           handlePeerListUpdate(message.peers);
         } else if (message.type === "error") {
           console.error("Signaling error:", message.error);
-          setConnectionError(message.error || "Unknown error");
+          setConnectionError(message.error ?? "Unknown signaling error");
           setConnectionState("failed");
         }
       });
+
+      // ── Periodic health scan ─────────────────────────────────────────────
+      // Every 30 s: re-initiate any connections that have gone broken without
+      // triggering a state-change event (can happen on some mobile browsers).
+      healthScanIntervalRef.current = setInterval(() => {
+        if (!signalingRef.current?.isConnected()) return;
+
+        peerConnectionsRef.current.forEach((state, peerId) => {
+          if (isConnectionBroken(state)) {
+            reconnectPeerRef.current?.(peerId);
+          }
+        });
+      }, 30_000);
     } catch (error) {
       console.error("WebRTC init failed:", error);
       setConnectionError("Failed to connect to signaling server");
@@ -724,21 +744,32 @@ export function useWebRTC() {
     handlePeerListUpdate,
   ]);
 
-  /**
-   * Cleanup all connections
-   */
+  // ─── cleanup ─────────────────────────────────────────────────────────────────
+
   const cleanup = useCallback(() => {
+    // Stop health scan
+    if (healthScanIntervalRef.current !== null) {
+      clearInterval(healthScanIntervalRef.current);
+      healthScanIntervalRef.current = null;
+    }
+
+    // Cancel all polite-peer fallback timers
+    politeTimeoutsRef.current.forEach((timer) => clearTimeout(timer));
+    politeTimeoutsRef.current.clear();
+
+    // Cancel all ICE-disconnect debounce timers
+    iceDisconnectTimersRef.current.forEach((timer) => clearTimeout(timer));
+    iceDisconnectTimersRef.current.clear();
+
     // Close all peer connections
     peerConnectionsRef.current.forEach((state) => {
-      if (state.dataChannel) {
-        state.dataChannel.close();
-      }
+      state.dataChannel?.close();
       state.pc.close();
     });
     peerConnectionsRef.current.clear();
     setReadyPeers(new Set());
 
-    // Disconnect signaling
+    // Disconnect signaling (intentional — suppresses reconnect loop)
     if (signalingRef.current) {
       if (session) {
         signalingRef.current.send({
@@ -756,78 +787,79 @@ export function useWebRTC() {
     setSessionConnected(false);
   }, [session, setConnectionState, setSessionConnected]);
 
-  // Store reconnection callback in ref (useEffect to avoid render-time ref update)
+  // ─── Effects ─────────────────────────────────────────────────────────────────
+
+  // Keep the reconnect ref in sync without adding it to dependency arrays.
   useEffect(() => {
     reconnectPeerRef.current = initiateConnectionToPeer;
   }, [initiateConnectionToPeer]);
 
-  // Handle visibility changes (mobile screen on/off)
+  // ── Visibility / focus recovery ─────────────────────────────────────────────
+  // When the user returns to the tab (mobile lock/unlock, alt-tab, etc.),
+  // check whether the signaling and peer connections are still alive and
+  // recover any that dropped while the page was hidden.
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        // Check signaling connection
-        if (signalingRef.current && !signalingRef.current.isConnected()) {
-          if (session && peerIdRef.current) {
-            initialize();
-          }
+    const recover = () => {
+      if (document.visibilityState !== "visible") return;
+
+      const sig = signalingRef.current;
+
+      if (!sig || !sig.isConnected()) {
+        // Signaling is gone — reset the initialized flag so initialize()
+        // will actually run (the guard check is hasInitializedRef.current).
+        if (sig) {
+          // SignalingClient exists but is not connected; let its own internal
+          // reconnect loop handle it — don't double-initialize.
+          return;
         }
-
-        // Check all peer connections and reconnect if needed
-        peerConnectionsRef.current.forEach((state, peerId) => {
-          if (
-            state.pc.iceConnectionState === "failed" ||
-            state.pc.iceConnectionState === "disconnected" ||
-            state.pc.connectionState === "failed" ||
-            state.pc.connectionState === "disconnected"
-          ) {
-            // Small delay to avoid race conditions
-            setTimeout(() => {
-              if (reconnectPeerRef.current) {
-                reconnectPeerRef.current(peerId);
-              }
-            }, 1000);
-          }
-        });
+        // No client at all: full re-init
+        hasInitializedRef.current = false;
+        initialize();
+        return;
       }
+
+      // Signaling is up — inspect individual peer connections
+      peerConnectionsRef.current.forEach((state, peerId) => {
+        if (isConnectionBroken(state)) {
+          setTimeout(() => {
+            reconnectPeerRef.current?.(peerId);
+          }, 1_000);
+        }
+      });
     };
 
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    // Also handle page focus/blur for additional mobile support
-    const handleFocus = () => {
-      handleVisibilityChange();
-    };
-
-    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", recover);
+    window.addEventListener("focus", recover);
 
     return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", recover);
+      window.removeEventListener("focus", recover);
     };
-  }, [session, initialize, initiateConnectionToPeer]);
+  }, [initialize]);
 
-  // Initialize when session is ready
+  // ── Session lifecycle ────────────────────────────────────────────────────────
+  // Only re-initialize (or cleanup) when the session *ID* actually changes.
+  // Using previousSessionIdRef prevents spurious re-runs caused by the session
+  // object reference being replaced while the ID stays the same.
   useEffect(() => {
     const currentSessionId = session?.id ?? null;
 
-    // Only re-initialize if session ID actually changed
-    if (currentSessionId !== previousSessionIdRef.current) {
-      previousSessionIdRef.current = currentSessionId;
+    if (currentSessionId === previousSessionIdRef.current) return;
+    previousSessionIdRef.current = currentSessionId;
 
-      if (!session) {
-        // Use setTimeout to avoid calling setState synchronously in effect
-        const timeoutId = setTimeout(() => {
-          cleanup();
-        }, 0);
-        return () => clearTimeout(timeoutId);
-      }
-
-      initialize();
-      return () => {
-        cleanup();
-      };
+    if (!session) {
+      // Session ended — defer cleanup out of the synchronous effect body
+      const t = setTimeout(() => cleanup(), 0);
+      return () => clearTimeout(t);
     }
+
+    initialize();
+    return () => {
+      cleanup();
+    };
   }, [session, cleanup, initialize]);
+
+  // ─── Return ──────────────────────────────────────────────────────────────────
 
   return {
     getDataChannelForPeer,
