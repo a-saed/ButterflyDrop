@@ -16,6 +16,7 @@ interface PeerNetworkProps {
   onPeerSelect?: (peerId: string) => void;
   hasFiles?: boolean;
   readyPeers?: string[];
+  onSyncWithPeer?: (peerId: string) => void;
 }
 
 /**
@@ -53,6 +54,7 @@ export function PeerNetwork({
   onPeerSelect,
   hasFiles,
   readyPeers = [],
+  onSyncWithPeer,
 }: PeerNetworkProps) {
   const peerPositions = useMemo(() => generatePeerPositions(peers), [peers]);
 
@@ -89,6 +91,11 @@ export function PeerNetwork({
             onClick={() => onPeerSelect?.(peer.id)}
             hasFiles={hasFiles && selectedPeerId === peer.id}
             isReady={isReady}
+            onSyncClick={
+              onSyncWithPeer && isReady
+                ? () => onSyncWithPeer(peer.id)
+                : undefined
+            }
           />
         );
       })}

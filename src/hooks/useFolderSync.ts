@@ -1,735 +1,376 @@
 /**
- * Folder Sync Hook (Rewritten)
- * Fixed all 10 bugs and implemented actual file synchronization
+ * useFolderSync — clean state-machine hook for folder-push sync.
+ *
+ * Phases:
+ *   idle        — nothing selected, waiting for user to pick a folder
+ *   scanning    — reading the folder contents (FSAPI or <input> fallback)
+ *   preview     — manifest built, waiting for user to confirm push
+ *   sending     — sendFiles() in progress (delegated to useFileTransfer)
+ *   done        — transfer complete
+ *   error       — something went wrong
+ *
+ * Design principles:
+ *   • No internal useFileTransfer instance — calls the shared sendFiles()
+ *     that is passed in as a prop so all file bytes flow through the single
+ *     registered data-channel handler.
+ *   • No IndexedDB persistence of FileSystemDirectoryHandle — handles cannot
+ *     be serialised; every sync starts fresh.
+ *   • Works on every browser: prefers File System Access API (Chrome/Edge),
+ *     falls back to <input webkitdirectory> (Firefox, Safari, mobile).
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { syncStorage } from "@/services/syncStorage";
-import type {
-  SyncConfig,
-  SyncState,
-  FileSnapshot,
-  SyncStatus,
-  SyncProgress,
-  ConflictResolutionAction,
-} from "@/types/sync";
-import {
-  requestFolderAccess,
-  scanFolderWithHandle,
-  scanFolderWithFileList,
-  createFolderInput,
-  detectBrowserCapabilities,
-} from "@/lib/folderScanner";
-import {
-  compareSnapshots,
-  calculateSyncPlan,
-  applyConflictResolutions,
-} from "@/lib/syncEngine";
-import { syncProtocol } from "@/services/syncProtocol";
-import { useSession } from "@/contexts/SessionContext";
-import { useWebRTCContext } from "@/contexts/WebRTCContext";
-import { useFileTransfer } from "./useFileTransfer";
-import { toast } from "sonner";
+import { useCallback, useReducer } from "react";
+import { createFileMetadata } from "@/lib/fileUtils";
+import type { FileMetadata } from "@/types/transfer";
 
-/**
- * Async queue for preventing concurrent operations on same config
- */
-class AsyncQueue {
-  private queues = new Map<string, Promise<unknown>>();
+// ─── Public types ─────────────────────────────────────────────────────────────
 
-  async run<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    // Wait for any existing operation on this key
-    const existing = this.queues.get(key);
-    if (existing) {
-      await existing.catch(() => {});
+export type FolderSyncPhase =
+  | "idle"
+  | "scanning"
+  | "preview"
+  | "sending"
+  | "done"
+  | "error";
+
+/** A lightweight descriptor for a single file inside the selected folder. */
+export interface SyncFileEntry {
+  /** Relative path from the folder root, e.g. "src/index.ts" */
+  path: string;
+  name: string;
+  size: number;
+  lastModified: number;
+  /** Back-reference to the original File object for actual transfer. */
+  file: File;
+}
+
+export interface FolderSyncState {
+  phase: FolderSyncPhase;
+  /** Display name of the selected folder (e.g. "Documents") */
+  folderName: string | null;
+  /** Flat list of every file found inside the folder */
+  entries: SyncFileEntry[];
+  /** Total bytes across all entries */
+  totalSize: number;
+  /** Human-readable error message when phase === "error" */
+  error: string | null;
+}
+
+// ─── Internal reducer ─────────────────────────────────────────────────────────
+
+type Action =
+  | { type: "SCAN_START" }
+  | {
+      type: "SCAN_DONE";
+      folderName: string;
+      entries: SyncFileEntry[];
     }
+  | { type: "SEND_START" }
+  | { type: "SEND_DONE" }
+  | { type: "ERROR"; message: string }
+  | { type: "RESET" };
 
-    // Create and store the new promise
-    const newPromise = fn().finally(() => {
-      // Only delete if we're still the current promise for this key
-      const current = this.queues.get(key);
-      if (current === newPromise) {
-        this.queues.delete(key);
-      }
-    });
+const initial: FolderSyncState = {
+  phase: "idle",
+  folderName: null,
+  entries: [],
+  totalSize: 0,
+  error: null,
+};
 
-    this.queues.set(key, newPromise);
-    return newPromise;
+function reducer(state: FolderSyncState, action: Action): FolderSyncState {
+  switch (action.type) {
+    case "SCAN_START":
+      return { ...initial, phase: "scanning" };
+
+    case "SCAN_DONE":
+      return {
+        ...state,
+        phase: "preview",
+        folderName: action.folderName,
+        entries: action.entries,
+        totalSize: action.entries.reduce((s, e) => s + e.size, 0),
+        error: null,
+      };
+
+    case "SEND_START":
+      return { ...state, phase: "sending", error: null };
+
+    case "SEND_DONE":
+      return { ...state, phase: "done" };
+
+    case "ERROR":
+      return { ...state, phase: "error", error: action.message };
+
+    case "RESET":
+      return { ...initial };
+
+    default:
+      return state;
   }
 }
 
-export function useFolderSync() {
-  const { session } = useSession();
-  const { getDataChannelForPeer, isPeerReady } = useWebRTCContext();
-  const { sendFiles } = useFileTransfer();
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-  const [syncConfigs, setSyncConfigs] = useState<SyncConfig[]>([]);
-  const [syncStates, setSyncStates] = useState<Map<string, SyncState>>(
-    new Map(),
-  );
-  const [syncProgress, setSyncProgress] = useState<Map<string, SyncProgress>>(
-    new Map(),
-  );
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+/** Recursively walk a FileSystemDirectoryHandle and collect every file. */
+async function walkDirectory(
+  dirHandle: FileSystemDirectoryHandle,
+  prefix: string,
+): Promise<SyncFileEntry[]> {
+  const entries: SyncFileEntry[] = [];
 
-  const asyncQueue = useRef(new AsyncQueue());
-  const browserCaps = useMemo(() => detectBrowserCapabilities(), []);
+  // FileSystemDirectoryHandle is async-iterable at runtime even though the
+  // TypeScript lib types don't expose entries() — cast to access it.
+  const iterable = dirHandle as FileSystemDirectoryHandle & {
+    entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
+  };
 
-  /**
-   * FIX #1: Return syncStates as Map (not array) for consistent API
-   */
-  const syncStatesArray = useMemo(
-    () => Array.from(syncStates.values()),
-    [syncStates],
-  );
+  for await (const [name, handle] of iterable.entries()) {
+    const relativePath = prefix ? `${prefix}/${name}` : name;
 
-  /**
-   * Load all sync configs from storage
-   */
-  const loadSyncConfigs = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const configs = await syncStorage.getAllSyncConfigs();
-      setSyncConfigs(configs);
-
-      // Load sync states for each config
-      const states = new Map<string, SyncState>();
-      for (const config of configs) {
-        const state = await syncStorage.getSyncState(config.id);
-        if (state) {
-          states.set(config.id, state);
-        }
-      }
-      setSyncStates(states);
-    } catch (err) {
-      console.error("Failed to load sync configs:", err);
-      setError(
-        err instanceof Error ? err.message : "Failed to load sync configs",
+    if (handle.kind === "file") {
+      const file = await (handle as FileSystemFileHandle).getFile();
+      entries.push({
+        path: relativePath,
+        name: file.name,
+        size: file.size,
+        lastModified: file.lastModified,
+        file,
+      });
+    } else if (handle.kind === "directory") {
+      const children = await walkDirectory(
+        handle as FileSystemDirectoryHandle,
+        relativePath,
       );
-      toast.error("Failed to load sync configs");
-    } finally {
-      setIsLoading(false);
+      entries.push(...children);
     }
-  }, []);
+  }
 
-  /**
-   * FIX #4: Validate session before operations
-   */
-  const ensureSession = useCallback(() => {
-    if (!session) {
-      throw new Error("No active session. Please wait for connection.");
-    }
-    return session;
-  }, [session]);
+  return entries;
+}
 
-  /**
-   * Create a new sync configuration
-   */
-  const createSync = useCallback(
-    async (
-      peerId: string,
-      peerName: string,
-      direction: SyncConfig["direction"] = "bidirectional",
-      conflictResolution: SyncConfig["conflictResolution"] = "last-write-wins",
-    ): Promise<SyncConfig | null> => {
-      const currentSession = ensureSession();
+/**
+ * Open a native directory picker (File System Access API).
+ * Returns null when the user cancels or the API is unavailable.
+ */
+async function pickWithFSAPI(): Promise<{
+  name: string;
+  entries: SyncFileEntry[];
+} | null> {
+  if (!("showDirectoryPicker" in window)) return null;
 
-      try {
-        let folderHandle: FileSystemDirectoryHandle | null = null;
-        let folderPath = "";
-        let folderName = "";
-        let trackedFiles: FileList | null = null;
+  try {
+    const picker = window as Window & {
+      showDirectoryPicker(opts?: {
+        mode?: "read" | "readwrite";
+      }): Promise<FileSystemDirectoryHandle>;
+    };
+    const dirHandle = await picker.showDirectoryPicker({ mode: "read" });
+    const entries = await walkDirectory(dirHandle, "");
+    return { name: dirHandle.name, entries };
+  } catch (err) {
+    if ((err as DOMException).name === "AbortError") return null; // user cancelled
+    throw err;
+  }
+}
 
-        // Try File System Access API first (Chrome/Edge)
-        if (browserCaps.hasFileSystemAccessAPI) {
-          folderHandle = await requestFolderAccess();
-          if (folderHandle) {
-            folderName = folderHandle.name;
-            folderPath = folderHandle.name;
-          }
-        }
+/**
+ * Fallback: open an <input webkitdirectory> element.
+ * Works on Firefox, Safari, and all mobile browsers.
+ * Returns null when the user cancels.
+ */
+function pickWithInput(): Promise<{
+  name: string;
+  entries: SyncFileEntry[];
+} | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.webkitdirectory = true;
+    input.multiple = true;
+    input.style.cssText = "position:fixed;opacity:0;pointer-events:none";
 
-        // FIX #3: Fallback to folder input (Firefox/mobile)
-        if (!folderHandle) {
-          trackedFiles = await createFolderInput();
-          if (trackedFiles && trackedFiles.length > 0) {
-            const firstFile = trackedFiles[0] as File & {
-              webkitRelativePath?: string;
-            };
-            const relativePath = firstFile.webkitRelativePath || firstFile.name;
-            const pathParts = relativePath.split("/");
-            folderName = pathParts[0] || "Selected Folder";
-            folderPath = folderName;
-          } else {
-            return null;
-          }
-        }
-
-        if (!folderHandle && !trackedFiles) {
-          throw new Error("Failed to select folder");
-        }
-
-        const config: SyncConfig = {
-          id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-          localFolderHandle: folderHandle,
-          localFolderPath: folderPath,
-          localFolderName: folderName,
-          peerId,
-          peerName,
-          sessionId: currentSession.id,
-          direction,
-          createdAt: Date.now(),
-          lastSyncedAt: null,
-          isActive: true,
-          conflictResolution,
-          trackedFiles,
-        };
-
-        await syncStorage.saveSyncConfig(config);
-        await loadSyncConfigs();
-
-        // Perform initial scan
-        await scanFolder(config.id);
-
-        toast.success(`Sync created with ${peerName}`);
-        return config;
-      } catch (err) {
-        console.error("Failed to create sync:", err);
-        setError(err instanceof Error ? err.message : "Failed to create sync");
-        toast.error(
-          err instanceof Error ? err.message : "Failed to create sync",
-        );
-        return null;
-      }
-    },
-    [ensureSession, browserCaps, loadSyncConfigs],
-  );
-
-  /**
-   * FIX #5 & #6: Scan folder with proper async locking and Firefox support
-   */
-  const scanFolder = useCallback(
-    async (configId: string): Promise<FileSnapshot[]> => {
-      return asyncQueue.current.run(configId, async () => {
-        try {
-          const config = await syncStorage.getSyncConfig(configId);
-          if (!config) {
-            throw new Error(`Sync config ${configId} not found`);
-          }
-
-          let snapshots: FileSnapshot[] = [];
-
-          // Use File System Access API if available
-          if (browserCaps.hasFileSystemAccessAPI) {
-            let folderHandle = config.localFolderHandle;
-            if (!folderHandle) {
-              folderHandle = await requestFolderAccess();
-              if (folderHandle) {
-                config.localFolderHandle = folderHandle;
-                await syncStorage.saveSyncConfig(config);
-              }
-            }
-
-            if (folderHandle) {
-              snapshots = await scanFolderWithHandle(folderHandle, configId);
-            } else {
-              throw new Error(
-                "Failed to access folder. Please recreate the sync.",
-              );
-            }
-          } else {
-            // FIX #6: For Firefox/mobile - use stored FileList if available
-            if (config.trackedFiles && config.trackedFiles.length > 0) {
-              snapshots = await scanFolderWithFileList(
-                config.trackedFiles,
-                configId,
-              );
-            } else {
-              // Need manual rescan
-              const fileList = await createFolderInput();
-              if (fileList && fileList.length > 0) {
-                snapshots = await scanFolderWithFileList(fileList, configId);
-                config.trackedFiles = fileList;
-              } else {
-                throw new Error("No folder selected");
-              }
-            }
-          }
-
-          // Save snapshots to storage
-          for (const snapshot of snapshots) {
-            await syncStorage.saveFileSnapshot(snapshot);
-          }
-
-          // Update sync state
-          const currentState = await syncStorage.getSyncState(configId);
-          const newState: SyncState = {
-            configId,
-            localSnapshot: snapshots,
-            remoteSnapshot: currentState?.remoteSnapshot || null,
-            status: snapshots.length > 0 ? "synced" : "out-of-sync",
-            lastCheckedAt: Date.now(),
-            pendingChanges: {
-              local: [],
-              remote: [],
-              conflicts: [],
-            },
-          };
-
-          await syncStorage.saveSyncState(newState);
-          setSyncStates((prev) => new Map(prev).set(configId, newState));
-
-          console.log("✅ Scan complete:", {
-            configId,
-            fileCount: snapshots.length,
-            status: newState.status,
-          });
-
-          return snapshots;
-        } catch (err) {
-          console.error(`Failed to scan folder for config ${configId}:`, err);
-          await syncStorage.updateSyncStatus(
-            configId,
-            "error",
-            err instanceof Error ? err.message : "Scan failed",
-          );
-          throw err;
-        }
-      });
-    },
-    [browserCaps],
-  );
-
-  /**
-   * FIX #1 & #7: Perform actual sync with file transfer
-   */
-  const performSync = useCallback(
-    async (configId: string): Promise<void> => {
-      return asyncQueue.current.run(configId, async () => {
-        const config = await syncStorage.getSyncConfig(configId);
-        if (!config) {
-          throw new Error(`Sync config ${configId} not found`);
-        }
-
-        // Check if peer is ready
-        const peerReady = isPeerReady(config.peerId);
-        console.log(`🔍 Checking peer ${config.peerId} (${config.peerName}):`, {
-          peerReady,
-          configId,
-        });
-
-        if (!peerReady) {
-          console.warn(`⚠️ Peer not ready, rescanning folder only`);
-          toast.info(
-            `Scanning folder... (${config.peerName} not connected yet)`,
-          );
-
-          // Just rescan and update local state
-          const snapshots = await scanFolder(configId);
-          console.log(`✅ Local scan complete: ${snapshots.length} files`);
-          toast.success(`Found ${snapshots.length} files in folder`);
-          return;
-        }
-
-        console.log(`✅ Peer ready, starting full sync...`);
-        toast.info(`Starting sync with ${config.peerName}...`);
-
-        // Update status to syncing
-        await syncStorage.updateSyncStatus(configId, "syncing");
-        setSyncStates((prev) => {
-          const state = prev.get(configId);
-          if (state) {
-            return new Map(prev).set(configId, {
-              ...state,
-              status: "syncing" as SyncStatus,
-            });
-          }
-          return prev;
-        });
-
-        // Set initial progress
-        setSyncProgress((prev) =>
-          new Map(prev).set(configId, {
-            configId,
-            phase: "scanning",
-            currentFile: null,
-            filesProcessed: 0,
-            totalFiles: 0,
-            bytesTransferred: 0,
-            totalBytes: 0,
-            speed: 0,
-            eta: 0,
-          }),
-        );
-
-        try {
-          // Phase 1: Scan local folder
-          const localSnapshots = await scanFolder(configId);
-
-          // Phase 2: Exchange metadata with peer
-          setSyncProgress((prev) => {
-            const p = prev.get(configId);
-            return new Map(prev).set(configId, { ...p!, phase: "comparing" });
-          });
-
-          await syncProtocol.sendMetadata(
-            config.peerId,
-            configId,
-            localSnapshots,
-          );
-
-          // Get remote snapshots (updated by protocol listener)
-          const currentState = await syncStorage.getSyncState(configId);
-          const remoteSnapshots = currentState?.remoteSnapshot || [];
-
-          // Phase 3: Calculate sync plan
-          const diff = compareSnapshots(localSnapshots, remoteSnapshots);
-          const plan = calculateSyncPlan(diff, config.direction);
-
-          if (plan.conflicts.length > 0) {
-            // Has conflicts - pause and wait for resolution
-            await syncStorage.updateSyncStatus(configId, "conflict");
-            setSyncStates((prev) => {
-              const state = prev.get(configId);
-              if (state) {
-                return new Map(prev).set(configId, {
-                  ...state,
-                  status: "conflict" as SyncStatus,
-                  pendingChanges: {
-                    local: plan.upload,
-                    remote: plan.download,
-                    conflicts: plan.conflicts,
-                  },
-                });
-              }
-              return prev;
-            });
-            toast.warning(`Sync has ${plan.conflicts.length} conflict(s)`);
-            return;
-          }
-
-          // Phase 4: Transfer files
-          setSyncProgress((prev) => {
-            const p = prev.get(configId);
-            return new Map(prev).set(configId, {
-              ...p!,
-              phase: "transferring",
-              totalFiles: plan.upload.length + plan.download.length,
-            });
-          });
-
-          let filesTransferred = 0;
-          let bytesTransferred = 0;
-
-          // Upload files
-          if (plan.upload.length > 0 && config.direction !== "download-only") {
-            const dataChannel = getDataChannelForPeer(config.peerId);
-            if (!dataChannel) {
-              throw new Error("Data channel not available");
-            }
-
-            // Convert snapshots to files
-            const filesToUpload = await Promise.all(
-              plan.upload.map(async (snapshot) => {
-                // Get file from folder
-                if (config.localFolderHandle) {
-                  const handle = await getFileHandleFromPath(
-                    config.localFolderHandle,
-                    snapshot.path,
-                  );
-                  if (handle) {
-                    return await handle.getFile();
-                  }
-                }
-                return null;
-              }),
-            );
-
-            const validFiles = filesToUpload.filter(
-              (f): f is File => f !== null,
-            );
-
-            if (validFiles.length > 0) {
-              await sendFiles(
-                validFiles,
-                dataChannel,
-                config.peerId,
-                config.peerName,
-              );
-              filesTransferred += validFiles.length;
-              bytesTransferred += validFiles.reduce(
-                (sum, f) => sum + f.size,
-                0,
-              );
-            }
-          }
-
-          // Download files handled by file transfer hook
-
-          // Phase 5: Finalize
-          setSyncProgress((prev) => {
-            const p = prev.get(configId);
-            return new Map(prev).set(configId, { ...p!, phase: "finalizing" });
-          });
-
-          // Update last synced time
-          config.lastSyncedAt = Date.now();
-          await syncStorage.saveSyncConfig(config);
-
-          // Update sync state
-          const newState: SyncState = {
-            configId,
-            localSnapshot: localSnapshots,
-            remoteSnapshot: remoteSnapshots,
-            status: "synced",
-            lastCheckedAt: Date.now(),
-            pendingChanges: {
-              local: [],
-              remote: [],
-              conflicts: [],
-            },
-          };
-
-          await syncStorage.saveSyncState(newState);
-          setSyncStates((prev) => new Map(prev).set(configId, newState));
-
-          // Clear progress
-          setSyncProgress((prev) => {
-            const newMap = new Map(prev);
-            newMap.delete(configId);
-            return newMap;
-          });
-
-          // Send completion message
-          await syncProtocol.sendSyncComplete(
-            config.peerId,
-            configId,
-            filesTransferred,
-            bytesTransferred,
-          );
-
-          toast.success("Sync completed successfully");
-        } catch (err) {
-          console.error(`Sync failed for config ${configId}:`, err);
-          await syncStorage.updateSyncStatus(
-            configId,
-            "error",
-            err instanceof Error ? err.message : "Sync failed",
-          );
-          setSyncProgress((prev) => {
-            const newMap = new Map(prev);
-            newMap.delete(configId);
-            return newMap;
-          });
-          toast.error(err instanceof Error ? err.message : "Sync failed");
-          throw err;
-        }
-      });
-    },
-    [isPeerReady, scanFolder, getDataChannelForPeer, sendFiles],
-  );
-
-  /**
-   * Resolve conflicts
-   */
-  const resolveConflicts = useCallback(
-    async (
-      configId: string,
-      resolutions: ConflictResolutionAction[],
-    ): Promise<void> => {
-      const state = syncStates.get(configId);
-      if (!state || state.pendingChanges.conflicts.length === 0) {
+    input.onchange = () => {
+      const files = input.files;
+      if (!files || files.length === 0) {
+        document.body.removeChild(input);
+        resolve(null);
         return;
       }
 
-      const plan = applyConflictResolutions(
-        state.pendingChanges.conflicts,
-        resolutions,
-      );
+      // Derive the folder name from the common webkitRelativePath prefix
+      const firstPath = (files[0] as File & { webkitRelativePath?: string })
+        .webkitRelativePath;
+      const folderName = firstPath ? firstPath.split("/")[0] : "Folder";
 
-      // Update state with resolved conflicts
-      const newState: SyncState = {
-        ...state,
-        status: plan.conflicts.length > 0 ? "conflict" : "out-of-sync",
-        pendingChanges: {
-          local: [...state.pendingChanges.local, ...plan.upload],
-          remote: [...state.pendingChanges.remote, ...plan.download],
-          conflicts: plan.conflicts,
-        },
-      };
-
-      await syncStorage.saveSyncState(newState);
-      setSyncStates((prev) => new Map(prev).set(configId, newState));
-
-      // If all conflicts resolved, trigger sync
-      if (plan.conflicts.length === 0) {
-        await performSync(configId);
-      }
-    },
-    [syncStates, performSync],
-  );
-
-  /**
-   * Delete sync configuration
-   */
-  const deleteSync = useCallback(
-    async (configId: string): Promise<void> => {
-      try {
-        await syncStorage.deleteSyncConfig(configId);
-        await loadSyncConfigs();
-        toast.success("Sync deleted");
-      } catch (err) {
-        console.error(`Failed to delete sync ${configId}:`, err);
-        setError(err instanceof Error ? err.message : "Failed to delete sync");
-        toast.error("Failed to delete sync");
-      }
-    },
-    [loadSyncConfigs],
-  );
-
-  /**
-   * Get sync state for a config
-   */
-  const getSyncState = useCallback(
-    (configId: string): SyncState | null => {
-      return syncStates.get(configId) || null;
-    },
-    [syncStates],
-  );
-
-  /**
-   * Get sync progress for a config
-   */
-  const getSyncProgress = useCallback(
-    (configId: string): SyncProgress | null => {
-      return syncProgress.get(configId) || null;
-    },
-    [syncProgress],
-  );
-
-  /**
-   * FIX #6 & #8: Check sync status for all configs (disabled for non-FSA browsers)
-   */
-  const checkAllSyncs = useCallback(async (): Promise<void> => {
-    for (const config of syncConfigs) {
-      if (!config.isActive) continue;
-
-      // FIX #6: Skip auto-check for Firefox/mobile
-      if (!browserCaps.hasFileSystemAccessAPI) {
-        continue;
-      }
-
-      try {
-        await scanFolder(config.id);
-      } catch (err) {
-        console.error(`Failed to check sync ${config.id}:`, err);
-      }
-    }
-  }, [syncConfigs, browserCaps, scanFolder]);
-
-  // Load sync configs on mount
-  useEffect(() => {
-    loadSyncConfigs();
-  }, [loadSyncConfigs]);
-
-  /**
-   * FIX #8: Stable auto-check with proper dependencies
-   */
-  useEffect(() => {
-    if (syncConfigs.length === 0 || !browserCaps.hasFileSystemAccessAPI) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      checkAllSyncs();
-    }, 60000); // 60 seconds
-
-    return () => clearInterval(interval);
-  }, [syncConfigs.length, browserCaps.hasFileSystemAccessAPI, checkAllSyncs]);
-
-  /**
-   * Setup sync protocol message handlers
-   */
-  useEffect(() => {
-    const unsubscribe = syncProtocol.on("message", async (_peerId, message) => {
-      if (message.type === "sync-metadata") {
-        const { configId, snapshots } = message.data as {
-          configId: string;
-          snapshots: FileSnapshot[];
+      const entries: SyncFileEntry[] = Array.from(files).map((file) => {
+        const rel = (file as File & { webkitRelativePath?: string })
+          .webkitRelativePath;
+        // Strip the top-level folder name so paths are relative to it
+        const path = rel
+          ? rel.split("/").slice(1).join("/") || file.name
+          : file.name;
+        return {
+          path,
+          name: file.name,
+          size: file.size,
+          lastModified: file.lastModified,
+          file,
         };
+      });
 
-        // Update remote snapshot
-        const state = await syncStorage.getSyncState(configId);
-        if (state) {
-          const newState: SyncState = {
-            ...state,
-            remoteSnapshot: snapshots,
-            status: "out-of-sync",
-          };
-          await syncStorage.saveSyncState(newState);
-          setSyncStates((prev) => new Map(prev).set(configId, newState));
-        }
-      }
-    });
+      document.body.removeChild(input);
+      resolve({ name: folderName, entries });
+    };
 
-    return unsubscribe;
-  }, []);
+    // Some browsers fire "cancel" on the input; others just never fire onchange.
+    // We rely on onchange for both cases (an empty FileList means cancel).
+    input.oncancel = () => {
+      document.body.removeChild(input);
+      resolve(null);
+    };
 
-  /**
-   * Register data channels with sync protocol
-   */
-  useEffect(() => {
-    for (const config of syncConfigs) {
-      const dataChannel = getDataChannelForPeer(config.peerId);
-      if (dataChannel) {
-        syncProtocol.registerDataChannel(config.peerId, dataChannel);
-      }
-    }
-  }, [syncConfigs, getDataChannelForPeer]);
-
-  return {
-    syncConfigs,
-    syncStates,
-    syncStatesArray,
-    syncProgress,
-    isLoading,
-    error,
-    createSync,
-    performSync,
-    deleteSync,
-    scanFolder,
-    getSyncState,
-    getSyncProgress,
-    checkAllSyncs,
-    resolveConflicts,
-    browserCaps,
-  };
+    document.body.appendChild(input);
+    input.click();
+  });
 }
 
-/**
- * Helper: Get file handle from path
- */
-async function getFileHandleFromPath(
-  dirHandle: FileSystemDirectoryHandle,
-  path: string,
-): Promise<FileSystemFileHandle | null> {
-  const parts = path.split("/");
-  let current: FileSystemDirectoryHandle = dirHandle;
+// ─── Hook ─────────────────────────────────────────────────────────────────────
 
-  // Navigate to parent directory
-  for (let i = 0; i < parts.length - 1; i++) {
+export interface UseFolderSyncOptions {
+  /**
+   * The shared sendFiles function from useFileTransfer.
+   * Must be the SAME instance used by the rest of the app so that file bytes
+   * flow through the registered onmessage handler.
+   */
+  sendFiles: (
+    files: File[],
+    dataChannel: RTCDataChannel,
+    peerId: string,
+    peerName: string,
+    folderName?: string,
+  ) => Promise<void>;
+  /** From useWebRTCContext */
+  getDataChannelForPeer: (peerId: string) => RTCDataChannel | null;
+}
+
+export function useFolderSync({
+  sendFiles,
+  getDataChannelForPeer,
+}: UseFolderSyncOptions) {
+  const [state, dispatch] = useReducer(reducer, initial);
+
+  // ── pickFolder ─────────────────────────────────────────────────────────────
+  /**
+   * Open the OS-level folder picker, scan all files inside, and move to the
+   * "preview" phase where the user sees the manifest before confirming.
+   */
+  const pickFolder = useCallback(async () => {
+    dispatch({ type: "SCAN_START" });
+
     try {
-      current = await current.getDirectoryHandle(parts[i]);
-    } catch {
-      return null;
-    }
-  }
+      // Prefer the modern File System Access API; fall back to <input>.
+      const result = (await pickWithFSAPI()) ?? (await pickWithInput());
 
-  // Get file handle
-  try {
-    return await current.getFileHandle(parts[parts.length - 1]);
-  } catch {
-    return null;
-  }
+      if (!result) {
+        // User cancelled — go back to idle silently
+        dispatch({ type: "RESET" });
+        return;
+      }
+
+      const { name, entries } = result;
+
+      if (entries.length === 0) {
+        dispatch({
+          type: "ERROR",
+          message: "The selected folder appears to be empty.",
+        });
+        return;
+      }
+
+      dispatch({ type: "SCAN_DONE", folderName: name, entries });
+    } catch (err) {
+      console.error("[useFolderSync] pickFolder error:", err);
+      dispatch({
+        type: "ERROR",
+        message:
+          err instanceof Error
+            ? err.message
+            : "Failed to read the folder. Please try again.",
+      });
+    }
+  }, []);
+
+  // ── startPush ──────────────────────────────────────────────────────────────
+  /**
+   * Begin streaming all selected files to the given peer.
+   * The actual file transfer is delegated to the shared sendFiles() so that
+   * progress updates flow through the central useFileTransfer state.
+   */
+  const startPush = useCallback(
+    async (peerId: string, peerName: string) => {
+      if (state.phase !== "preview") return;
+
+      const dataChannel = getDataChannelForPeer(peerId);
+      if (!dataChannel || dataChannel.readyState !== "open") {
+        dispatch({
+          type: "ERROR",
+          message: `No open connection to ${peerName}. Make sure they're still connected.`,
+        });
+        return;
+      }
+
+      dispatch({ type: "SEND_START" });
+
+      try {
+        const files: File[] = state.entries.map((e) => e.file);
+        await sendFiles(
+          files,
+          dataChannel,
+          peerId,
+          peerName,
+          state.folderName ?? "Folder",
+        );
+        dispatch({ type: "SEND_DONE" });
+      } catch (err) {
+        console.error("[useFolderSync] startPush error:", err);
+        dispatch({
+          type: "ERROR",
+          message:
+            err instanceof Error ? err.message : "Transfer failed. Try again.",
+        });
+      }
+    },
+    [
+      state.phase,
+      state.entries,
+      state.folderName,
+      sendFiles,
+      getDataChannelForPeer,
+    ],
+  );
+
+  // ── reset ──────────────────────────────────────────────────────────────────
+  const reset = useCallback(() => {
+    dispatch({ type: "RESET" });
+  }, []);
+
+  // ── buildFileMetadata ──────────────────────────────────────────────────────
+  /**
+   * Build FileMetadata[] for display purposes (e.g. in the diff preview).
+   * Does NOT include the actual File objects — those stay in state.entries.
+   */
+  const buildManifest = useCallback((): FileMetadata[] => {
+    return state.entries.map((e) =>
+      createFileMetadata(e.file, undefined, e.path),
+    );
+  }, [state.entries]);
+
+  return {
+    ...state,
+    pickFolder,
+    startPush,
+    reset,
+    buildManifest,
+  };
 }

@@ -37,6 +37,8 @@ export interface IncomingTransfer {
   files: FileMetadata[];
   totalSize: number;
   timestamp: number;
+  /** Set when the transfer originated from a folder sync */
+  folderName?: string;
 }
 
 // Transfer state for UI
@@ -105,6 +107,15 @@ export function useFileTransfer() {
   }
 
   const receiversRef = useRef<Map<string, ReceiverState>>(new Map());
+
+  /**
+   * Per-peer sync control message handlers.
+   * useFolderSync registers a handler here so it can receive sync-manifest /
+   * sync-ack / sync-done messages that arrive on the shared data channel.
+   */
+  const syncHandlersRef = useRef<
+    Map<string, (msg: Record<string, unknown>) => void>
+  >(new Map());
 
   const receivedFilesBackupRef = useRef<ReceivedFile[]>([]);
 
@@ -297,6 +308,21 @@ export function useFileTransfer() {
         if (typeof event.data === "string") {
           const message: TransferMessage = JSON.parse(event.data);
 
+          // ── Sync control messages ──────────────────────────────────────────
+          // These are thin JSON envelopes used by useFolderSync to coordinate a
+          // sync session.  They don't carry file bytes so they're handled here
+          // and forwarded to whoever registered a handler for this peer.
+          if (
+            typeof message.type === "string" &&
+            message.type.startsWith("sync-")
+          ) {
+            const handler = syncHandlersRef.current.get(peerId);
+            if (handler) {
+              handler(message as unknown as Record<string, unknown>);
+            }
+            return;
+          }
+
           if (message.type === "metadata" && message.data) {
             const metadata = message.data;
             console.log(
@@ -333,6 +359,7 @@ export function useFileTransfer() {
                 files: metadata.files,
                 totalSize,
                 timestamp: Date.now(),
+                folderName: metadata.folderName,
               },
               isReceiving: true,
               receivingFromPeer: peerId,
@@ -589,6 +616,8 @@ export function useFileTransfer() {
       dataChannel: RTCDataChannel,
       peerId: string,
       peerName: string,
+      /** Optional: set to folder name when this is a folder-sync transfer */
+      folderName?: string,
     ) => {
       if (!dataChannel || dataChannel.readyState !== "open") {
         throw new Error("Data channel not open");
@@ -620,8 +649,9 @@ export function useFileTransfer() {
           createFileMetadata(f),
         );
         const metadata: TransferMetadata = {
-          type: "file",
+          type: folderName ? "folder" : "file",
           files: fileMetadata,
+          ...(folderName ? { folderName } : {}),
         };
 
         dataChannel.send(
@@ -788,7 +818,26 @@ export function useFileTransfer() {
   const cleanupPeer = useCallback((peerId: string) => {
     receiversRef.current.delete(peerId);
     setupChannelsRef.current.delete(peerId);
+    syncHandlersRef.current.delete(peerId);
   }, []);
+
+  /**
+   * Register a handler for sync control messages (sync-manifest, sync-ack, sync-done)
+   * arriving on the data channel for a given peer.
+   * Returns an unregister function — call it in a cleanup effect.
+   */
+  const registerSyncHandler = useCallback(
+    (
+      peerId: string,
+      handler: (msg: Record<string, unknown>) => void,
+    ): (() => void) => {
+      syncHandlersRef.current.set(peerId, handler);
+      return () => {
+        syncHandlersRef.current.delete(peerId);
+      };
+    },
+    [],
+  );
 
   return {
     ...state,
@@ -799,6 +848,7 @@ export function useFileTransfer() {
     clearReceivedFiles,
     resetSendState,
     cleanupPeer,
+    registerSyncHandler,
     formatBytes,
   };
 }

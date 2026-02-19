@@ -22,18 +22,11 @@ import { ConnectionStatus } from "@/components/connection/ConnectionStatus";
 import { createShareableUrl } from "@/lib/sessionUtils";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Upload, Send, Github, FolderSync } from "lucide-react";
+import { Upload, Send, Github } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDropzone } from "react-dropzone";
 import { useSoundEffects } from "@/hooks/useSoundEffects";
-import { SimpleSyncDialog } from "@/components/sync/SimpleSyncDialog";
-import { SyncDashboard } from "@/components/sync/SyncDashboard";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { SyncSheet } from "@/components/sync/SyncSheet";
 
 function AppContent() {
   const {
@@ -92,8 +85,7 @@ function AppContent() {
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedPeerId, setSelectedPeerId] = useState<string>();
-  const [isSyncDialogOpen, setIsSyncDialogOpen] = useState(false);
-  const [isSyncWizardOpen, setIsSyncWizardOpen] = useState(false);
+  const [syncPeerId, setSyncPeerId] = useState<string | null>(null);
 
   // Track which peers have receivers set up
   const setupPeersRef = useRef<Set<string>>(new Set());
@@ -444,6 +436,10 @@ function AppContent() {
     [selectedFiles, peers],
   );
 
+  const handleSyncWithPeer = useCallback((peerId: string) => {
+    setSyncPeerId(peerId);
+  }, []);
+
   // Auto-select first peer when peers are discovered
   useEffect(() => {
     if (peers.length > 0 && !selectedPeerId) {
@@ -526,16 +522,6 @@ function AppContent() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setIsSyncDialogOpen(true)}
-              className="h-9 w-9"
-              aria-label="Folder Sync"
-              title="Folder Sync"
-            >
-              <FolderSync className="h-5 w-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
               onClick={() =>
                 window.open("https://github.com/a-saed/ButterflyDrop", "_blank")
               }
@@ -558,6 +544,7 @@ function AppContent() {
               onPeerSelect={handlePeerSelect}
               hasFiles={selectedFiles.length > 0}
               readyPeers={readyPeers}
+              onSyncWithPeer={handleSyncWithPeer}
             />
           </div>
 
@@ -694,31 +681,27 @@ function AppContent() {
         formatBytes={formatBytes}
       />
 
-      {/* Sync Dialog */}
-      {/* Sync Dashboard Dialog */}
-      <Dialog open={isSyncDialogOpen} onOpenChange={setIsSyncDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Folder Sync</DialogTitle>
-          </DialogHeader>
-          <SyncDashboard
-            onAddSync={() => {
-              setIsSyncDialogOpen(false);
-              setIsSyncWizardOpen(true);
-            }}
-          />
-        </DialogContent>
-      </Dialog>
-
-      {/* Simple Sync Dialog */}
-      <SimpleSyncDialog
-        open={isSyncWizardOpen}
-        onOpenChange={setIsSyncWizardOpen}
-        onSuccess={() => {
-          setIsSyncWizardOpen(false);
-          setIsSyncDialogOpen(true);
-        }}
-      />
+      {/* Folder Sync Sheet — triggered from peer avatar "Sync folder" button */}
+      {syncPeerId && (
+        <SyncSheet
+          open={!!syncPeerId}
+          onClose={() => {
+            setSyncPeerId(null);
+            resetSendState();
+          }}
+          peerId={syncPeerId}
+          peerName={peers.find((p) => p.id === syncPeerId)?.name ?? "Peer"}
+          sendFiles={sendFiles}
+          getDataChannelForPeer={getDataChannelForPeer}
+          isPeerReady={isPeerReady}
+          isSending={isSending}
+          sendProgress={sendProgress}
+          sendComplete={sendComplete}
+          sendError={sendError}
+          resetSendState={resetSendState}
+          formatBytes={formatBytes}
+        />
+      )}
 
       <Toaster />
     </div>

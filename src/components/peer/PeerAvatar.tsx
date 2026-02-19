@@ -5,6 +5,7 @@ import {
   Laptop,
   Loader2,
   Check,
+  FolderSync,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,7 @@ interface PeerAvatarProps {
   onClick?: () => void;
   hasFiles?: boolean;
   isReady?: boolean;
+  onSyncClick?: () => void;
 }
 
 const deviceIcons = {
@@ -74,6 +76,7 @@ export function PeerAvatar({
   onClick,
   hasFiles,
   isReady = false,
+  onSyncClick,
 }: PeerAvatarProps) {
   const Icon = deviceIcons[peer.deviceType];
   const [imageError, setImageError] = useState(false);
@@ -93,9 +96,7 @@ export function PeerAvatar({
   }, [peer.id, peer.deviceType]);
 
   return (
-    <button
-      onClick={onClick}
-      disabled={!peer.isOnline}
+    <div
       className={cn(
         "absolute group transition-all duration-300",
         peer.isOnline ? "cursor-pointer" : "cursor-not-allowed opacity-50",
@@ -106,36 +107,48 @@ export function PeerAvatar({
         transform: "translate(-50%, -50%)",
       }}
     >
-      {/* Ripple effect when selected or has files */}
-      {(isSelected || hasFiles) && peer.isOnline && (
-        <>
-          <div
-            className="absolute inset-0 rounded-full bg-primary/20 animate-ping"
-            style={{ animationDuration: "2s" }}
-          />
-          <div className="absolute inset-0 rounded-full bg-primary/10 animate-pulse" />
-        </>
-      )}
+      {/* Avatar button */}
+      <button onClick={onClick} disabled={!peer.isOnline} className="block">
+        {/* Ripple effect when selected or has files */}
+        {(isSelected || hasFiles) && peer.isOnline && (
+          <>
+            <div
+              className="absolute inset-0 rounded-full bg-primary/20 animate-ping"
+              style={{ animationDuration: "2s" }}
+            />
+            <div className="absolute inset-0 rounded-full bg-primary/10 animate-pulse" />
+          </>
+        )}
 
-      {/* Main Avatar */}
-      <div className="relative">
-        <Avatar
-          className={cn(
-            "h-20 w-20 border-4 transition-all duration-300 overflow-hidden",
-            peer.isOnline
-              ? "border-border/50 hover:border-primary/50 hover:scale-110"
-              : "border-border/20",
-            isSelected && "border-primary scale-110 shadow-2xl",
-          )}
-        >
-          {!imageError ? (
-            <>
-              <AvatarImage
-                src={avatarUrl}
-                alt={peer.name}
-                onError={() => setImageError(true)}
-                className="object-cover"
-              />
+        {/* Main Avatar */}
+        <div className="relative">
+          <Avatar
+            className={cn(
+              "h-20 w-20 border-4 transition-all duration-300 overflow-hidden",
+              peer.isOnline
+                ? "border-border/50 hover:border-primary/50 hover:scale-110"
+                : "border-border/20",
+              isSelected && "border-primary scale-110 shadow-2xl",
+            )}
+          >
+            {!imageError ? (
+              <>
+                <AvatarImage
+                  src={avatarUrl}
+                  alt={peer.name}
+                  onError={() => setImageError(true)}
+                  className="object-cover"
+                />
+                <AvatarFallback
+                  className={cn(
+                    "bg-gradient-to-br",
+                    deviceColors[peer.deviceType],
+                  )}
+                >
+                  <Icon className="h-10 w-10 text-white" />
+                </AvatarFallback>
+              </>
+            ) : (
               <AvatarFallback
                 className={cn(
                   "bg-gradient-to-br",
@@ -144,68 +157,86 @@ export function PeerAvatar({
               >
                 <Icon className="h-10 w-10 text-white" />
               </AvatarFallback>
-            </>
-          ) : (
-            <AvatarFallback
-              className={cn("bg-gradient-to-br", deviceColors[peer.deviceType])}
-            >
-              <Icon className="h-10 w-10 text-white" />
-            </AvatarFallback>
-          )}
-        </Avatar>
+            )}
+          </Avatar>
 
-        {/* Device type badge - small icon overlay */}
-        <div
-          className={cn(
-            "absolute -bottom-1 -left-1 h-6 w-6 rounded-full border-2 border-background",
-            "bg-background/90 backdrop-blur-sm flex items-center justify-center",
-            "shadow-sm",
-          )}
-        >
-          <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-        </div>
-
-        {/* Connection status indicator */}
-        {peer.isOnline && (
+          {/* Device type badge - small icon overlay */}
           <div
             className={cn(
-              "absolute -bottom-1 -right-1 h-5 w-5 rounded-full border-2 border-background flex items-center justify-center",
-              isReady ? "bg-green-500" : "bg-yellow-500",
+              "absolute -bottom-1 -left-1 h-6 w-6 rounded-full border-2 border-background",
+              "bg-background/90 backdrop-blur-sm flex items-center justify-center",
+              "shadow-sm",
             )}
           >
-            {isReady ? (
-              <Check className="h-3 w-3 text-white" />
-            ) : (
-              <Loader2 className="h-3 w-3 text-white animate-spin" />
-            )}
+            <Icon className="h-3.5 w-3.5 text-muted-foreground" />
           </div>
-        )}
 
-        {/* Send indicator */}
-        {hasFiles && peer.isOnline && (
-          <div className="absolute -top-1 -right-1">
-            <div className="h-4 w-4 rounded-full bg-primary animate-ping" />
-            <div className="absolute top-0 right-0 h-4 w-4 rounded-full bg-primary" />
-          </div>
-        )}
-      </div>
+          {/* Connection status indicator */}
+          {peer.isOnline && (
+            <div
+              className={cn(
+                "absolute -bottom-1 -right-1 h-5 w-5 rounded-full border-2 border-background flex items-center justify-center",
+                isReady ? "bg-green-500" : "bg-yellow-500",
+              )}
+            >
+              {isReady ? (
+                <Check className="h-3 w-3 text-white" />
+              ) : (
+                <Loader2 className="h-3 w-3 text-white animate-spin" />
+              )}
+            </div>
+          )}
 
-      {/* Device Name */}
-      <div
-        className={cn(
-          "absolute top-full mt-2 left-1/2 -translate-x-1/2 whitespace-nowrap",
-          "px-3 py-1 rounded-full bg-background/80 backdrop-blur-sm border border-border/50",
-          "text-xs font-medium transition-all duration-300",
-          "opacity-0 group-hover:opacity-100",
-          isSelected && "opacity-100",
-        )}
-      >
-        <span>{peer.name}</span>
-        {peer.isOnline && !isReady && (
-          <span className="ml-1.5 text-yellow-500">• Connecting...</span>
-        )}
-        {isReady && <span className="ml-1.5 text-green-500">• Ready</span>}
-      </div>
-    </button>
+          {/* Send indicator */}
+          {hasFiles && peer.isOnline && (
+            <div className="absolute -top-1 -right-1">
+              <div className="h-4 w-4 rounded-full bg-primary animate-ping" />
+              <div className="absolute top-0 right-0 h-4 w-4 rounded-full bg-primary" />
+            </div>
+          )}
+        </div>
+
+        {/* Device Name */}
+        <div
+          className={cn(
+            "absolute top-full mt-2 left-1/2 -translate-x-1/2 whitespace-nowrap",
+            "px-3 py-1 rounded-full bg-background/80 backdrop-blur-sm border border-border/50",
+            "text-xs font-medium transition-all duration-300",
+            "opacity-0 group-hover:opacity-100",
+            isSelected && "opacity-100",
+          )}
+        >
+          <span>{peer.name}</span>
+          {peer.isOnline && !isReady && (
+            <span className="ml-1.5 text-yellow-500">• Connecting...</span>
+          )}
+          {isReady && <span className="ml-1.5 text-green-500">• Ready</span>}
+        </div>
+      </button>
+
+      {/* Sync folder button — appears below avatar when peer is ready */}
+      {isReady && onSyncClick && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onSyncClick();
+          }}
+          className={cn(
+            "absolute top-full mt-9 left-1/2 -translate-x-1/2 whitespace-nowrap",
+            "flex items-center gap-1 px-2.5 py-1 rounded-full",
+            "bg-background/90 backdrop-blur-sm border border-primary/30",
+            "text-[11px] font-medium text-primary",
+            "shadow-sm hover:shadow-md hover:bg-primary/10 hover:border-primary/60",
+            "transition-all duration-200",
+            "opacity-0 group-hover:opacity-100 group-hover:translate-y-0",
+            "translate-y-1",
+          )}
+          title={`Sync a folder with ${peer.name}`}
+        >
+          <FolderSync className="h-3 w-3" />
+          Sync folder
+        </button>
+      )}
+    </div>
   );
 }
