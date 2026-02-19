@@ -481,14 +481,24 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
       break;
     }
 
+    case "ping": {
+      // Application-level heartbeat from client — respond with pong to confirm
+      // the connection is alive. Silently ignore if socket is already closing.
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "pong" }));
+      }
+      break;
+    }
+
+    case "pong": {
+      // Client responding to a server-initiated ping (future use). Nothing to do.
+      break;
+    }
+
     default:
-      ws.send(
-        JSON.stringify({
-          type: "error",
-          sessionId: sessionId || "",
-          error: `Unknown message type: ${type}`,
-        }),
-      );
+      // Only log unexpected types — don't send an error for unknown internal
+      // messages so a future protocol extension doesn't break older clients.
+      console.warn(`Unhandled message type: ${type}`);
   }
 }
 

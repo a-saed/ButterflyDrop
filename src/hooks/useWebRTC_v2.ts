@@ -639,18 +639,15 @@ export function useWebRTC() {
       // the session-join (avoids a "myPeerId not set yet" warning).
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      // ── Connect to signaling server ──────────────────────────────────────
+      // ── Build signaling client ───────────────────────────────────────────
       const signaling = new SignalingClient(SIGNALING_URL);
       signalingRef.current = signaling;
 
-      try {
-        await signaling.connect();
-      } catch (error) {
-        console.error("Failed to connect to signaling server:", error);
-        throw error;
-      }
-
-      // ── Join the session ─────────────────────────────────────────────────
+      // ── session-join helper ──────────────────────────────────────────────
+      // Defined before any connect() call so the "open" handler below can
+      // reference it at the exact moment the socket opens (eliminating the
+      // race where the server's confirmation arrives before our "message"
+      // handler is registered).
       const sendJoin = () => {
         signaling.send({
           type: "session-join",
@@ -661,10 +658,25 @@ export function useWebRTC() {
         });
       };
 
-      sendJoin();
+      // ── Register ALL event handlers BEFORE calling connect() ─────────────
+      //
+      // Critical ordering guarantee:
+      //   1. Handlers are registered.
+      //   2. connect() opens the WebSocket.
+      //   3. ws.onopen fires → emit("open") → sendJoin() is called
+      //      (synchronously, before connect()'s Promise even resolves).
+      //   4. Server processes join and immediately sends back the
+      //      session-join confirmation.
+      //   5. ws.onmessage fires → our "message" handler is already in the
+      //      map → confirmation is processed without being lost.
+      //
+      // With the old ordering (connect() first, handlers second) there was a
+      // microtask window between connect() resolving and the "message" handler
+      // being registered where the server's fast response could arrive and be
+      // emitted to nobody, leaving the UI stuck on the first page load until
+      // a manual reload.
 
-      // Re-join after every signaling reconnect (the server forgets sessions
-      // on restart; re-joining puts us back in the peer list).
+      // "open" fires on initial connect AND on every successful reconnect.
       signaling.on("open", () => {
         sendJoin();
         setConnectionState("connecting");
@@ -708,11 +720,28 @@ export function useWebRTC() {
         } else if (message.type === "peer-list" && message.peers) {
           handlePeerListUpdate(message.peers);
         } else if (message.type === "error") {
+          // Log the error for debugging, but do NOT set connectionState to
+          // "failed" for transient signaling errors — doing so would show the
+          // error UI while the WebRTC peer connection itself is still healthy.
           console.error("Signaling error:", message.error);
           setConnectionError(message.error ?? "Unknown signaling error");
-          setConnectionState("failed");
+          // Only escalate to "failed" if we have no active peer connections.
+          const hasActivePeers = Array.from(
+            peerConnectionsRef.current.values(),
+          ).some(isConnectionHealthy);
+          if (!hasActivePeers) {
+            setConnectionState("failed");
+          }
         }
       });
+
+      // ── Now connect — sendJoin() will be called by the "open" handler ────
+      try {
+        await signaling.connect();
+      } catch (error) {
+        console.error("Failed to connect to signaling server:", error);
+        throw error;
+      }
 
       // ── Periodic health scan ─────────────────────────────────────────────
       // Every 30 s: re-initiate any connections that have gone broken without

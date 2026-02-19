@@ -85,6 +85,7 @@ function AppContent() {
     downloadAllFiles,
     clearReceivedFiles,
     resetSendState,
+    cleanupPeer,
     // Helpers
     formatBytes,
   } = useFileTransfer();
@@ -152,9 +153,24 @@ function AppContent() {
   // Setup file receiver for all ready peers
   // This is CRITICAL - must set up onmessage handler before files arrive
   useEffect(() => {
+    // ── Cleanup stale entries ────────────────────────────────────────────────
+    // When a peer disconnects and later reconnects, readyPeers first removes
+    // the peerId, then adds it again. Without this cleanup, setupPeersRef
+    // still holds the old peerId so setupReceiver is never called for the new
+    // data channel, and messages arrive silently with no handler.
+    const currentReadySet = new Set(readyPeers);
+    setupPeersRef.current.forEach((id) => {
+      if (!currentReadySet.has(id)) {
+        setupPeersRef.current.delete(id);
+        // Also clear the internal setupChannelsRef inside useFileTransfer so
+        // setupReceiver is allowed to run again for the new channel.
+        cleanupPeer(id);
+      }
+    });
+
     if (session.session && readyPeers.length > 0) {
       readyPeers.forEach((peerId) => {
-        // Skip if already set up
+        // Skip if already set up for this connection
         if (setupPeersRef.current.has(peerId)) return;
 
         const dataChannel = getDataChannelForPeer(peerId);
@@ -178,6 +194,7 @@ function AppContent() {
     getDataChannelForPeer,
     getQueuedMessagesForPeer,
     setupReceiver,
+    cleanupPeer,
   ]);
 
   // Track previous ready peers count for sound effects

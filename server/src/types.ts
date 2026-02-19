@@ -15,7 +15,9 @@ export interface SignalingMessage {
     | "peer-announce"
     | "peer-list"
     | "network-list"
-    | "error";
+    | "error"
+    | "ping"
+    | "pong";
   sessionId?: string;
   networkId?: string;
   peerId?: string;
