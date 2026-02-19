@@ -504,14 +504,6 @@ export function useWebRTC() {
   const handlePeerListUpdate = useCallback(
     (peers: Array<{ id: string; name: string; deviceType: string }>) => {
       const myId = peerIdRef.current;
-      console.log(
-        `👥 Peer list updated, processing ${peers.length} total peers`,
-      );
-      console.log(`   My ID: ${myId} (${myId.slice(0, 8)}...)`);
-      console.log(
-        `   All peers:`,
-        peers.map((p) => `${p.name} (${p.id.slice(0, 8)}...)`),
-      );
 
       // Filter out self and add isOnline property
       const otherPeers = peers
@@ -522,12 +514,8 @@ export function useWebRTC() {
           deviceType: peer.deviceType,
           isOnline: true,
         }));
-      console.log(
-        `🔍 Found ${otherPeers.length} other peers after filtering self`,
-      );
 
       if (otherPeers.length === 0) {
-        console.log(`   ℹ️ No other peers to connect to`);
         setPeers(otherPeers);
         return;
       }
@@ -537,41 +525,18 @@ export function useWebRTC() {
       otherPeers.forEach((peer) => {
         const alreadyConnected = peerConnectionsRef.current.has(peer.id);
 
-        console.log(
-          `🤝 Processing peer: ${peer.name} (${peer.id.slice(0, 8)}...)`,
-        );
-        console.log(`   Already connected: ${alreadyConnected}`);
-
         if (!alreadyConnected) {
           // Determine if we're "polite" (higher ID = polite, waits for offers)
           // or "impolite" (lower ID = impolite, sends offers immediately)
           const isPolite = myId > peer.id;
-          console.log(
-            `   🎭 I am ${
-              isPolite ? "polite (higher ID)" : "impolite (lower ID)"
-            }`,
-          );
 
           if (!isPolite) {
             // Impolite peer initiates immediately
-            console.log(
-              `   ✅ I will initiate connection to ${peer.name} (impolite peer)`,
-            );
-            console.log(
-              `   🔍 Debug: session=${!!session}, signaling=${!!signalingRef.current}`,
-            );
-            // Initiate immediately - session is available in this scope
             if (!peerConnectionsRef.current.has(peer.id)) {
               initiateConnectionToPeer(peer.id);
             }
-          } else {
-            // Polite peer waits for offer, but sets up to receive it
-            console.log(
-              `   ⏳ I will wait for ${peer.name} to initiate (polite peer)`,
-            );
           }
-        } else {
-          console.log(`   ℹ️ Already connected to ${peer.name}`);
+          // Polite peer waits for the remote offer to arrive via signaling
         }
       });
 
@@ -654,47 +619,24 @@ export function useWebRTC() {
     hasInitializedRef.current = true;
     const myId = peerIdRef.current;
 
-    console.log(
-      `🦋 Initializing session ${session.id} as ${
-        deviceNameRef.current
-      } (peer ${myId.slice(0, 8)}...)`,
-    );
-    console.log(`\n📋 To invite others:`);
-    console.log(`   1. Copy the session URL from the top of the page`);
-    console.log(`   2. OR scan the QR code with another device`);
-    console.log(`   3. Make sure devices are on the same network`);
-    console.log(`   ⏳ Waiting for peers to join...\n`);
-
     try {
       setConnectionState("connecting");
 
       // CRITICAL: Store my peer ID FIRST before any async operations
       // This ensures SessionContext has myPeerId before peer list arrives
-      console.log(
-        `🆔 Setting my peer ID FIRST: ${myId} (${myId.slice(0, 8)}...)`,
-      );
       setMyPeerId(myId);
 
       // Small delay to ensure state update propagates
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Connect to signaling server
-      console.log(`🔌 Connecting to signaling server: ${SIGNALING_URL}`);
-      console.log(
-        `   Environment variable: ${import.meta.env.VITE_SIGNALING_URL || "not set"}`,
-      );
       const signaling = new SignalingClient(SIGNALING_URL);
       signalingRef.current = signaling;
 
       try {
         await signaling.connect();
-        console.log("✅ Connected to signaling server");
       } catch (error) {
         console.error("❌ Failed to connect to signaling server:", error);
-        console.error(`   URL attempted: ${SIGNALING_URL}`);
-        console.error(
-          `   Make sure the signaling server is running on port 8080`,
-        );
         throw error; // Re-throw to be caught by outer try-catch
       }
 
@@ -709,17 +651,12 @@ export function useWebRTC() {
 
       // Handle signaling server reconnection
       signaling.on("close", () => {
-        console.log(
-          "⚠️ Signaling server disconnected - will attempt to reconnect",
-        );
         setConnectionState("connecting");
       });
 
       signaling.on("open", () => {
-        console.log("✅ Signaling server reconnected");
         // Rejoin session if we were already in one
         if (session && peerIdRef.current) {
-          console.log("🔄 Rejoining session after signaling reconnection...");
           signaling.send({
             type: "session-join",
             sessionId: session.id,
@@ -733,15 +670,8 @@ export function useWebRTC() {
       // Handle signaling messages
       signaling.on("message", async (data: unknown) => {
         const message = data as SignalingMessage;
-        console.log(
-          `📨 Received signaling message: ${message.type}`,
-          message.peerId ? `from ${message.peerId.slice(0, 8)}...` : "",
-        );
 
         if (message.type === "offer" && message.peerId && message.data) {
-          console.log(
-            `   Processing offer from ${message.peerId.slice(0, 8)}...`,
-          );
           await handleOffer(
             message.peerId,
             message.data as RTCSessionDescriptionInit,
@@ -751,9 +681,6 @@ export function useWebRTC() {
           message.peerId &&
           message.data
         ) {
-          console.log(
-            `   Processing answer from ${message.peerId.slice(0, 8)}...`,
-          );
           await handleAnswer(
             message.peerId,
             message.data as RTCSessionDescriptionInit,
@@ -768,47 +695,19 @@ export function useWebRTC() {
             message.data as RTCIceCandidateInit,
           );
         } else if (message.type === "session-join" && message.peers) {
-          const otherPeerCount = message.peers.filter(
-            (p) => p.id !== myId,
-          ).length;
-          console.log("✅ Joined session, received peer list");
-          console.log(`   Total peers in session: ${message.peers.length}`);
-          console.log(`   Other peers (excluding self): ${otherPeerCount}`);
-
-          if (otherPeerCount === 0) {
-            console.log(
-              `\n💡 No other peers yet! Share the session URL to invite others.\n`,
-            );
-          } else {
-            console.log(
-              `\n🎉 Found ${otherPeerCount} other peer(s)! Starting connection...\n`,
-            );
-          }
-
           handlePeerListUpdate(message.peers);
           setConnectionState("connected");
           setSessionConnected(true);
         } else if (message.type === "peer-list" && message.peers) {
-          const otherPeerCount = message.peers.filter(
-            (p) => p.id !== myId,
-          ).length;
-          console.log("🔄 Peer list updated");
-          console.log(`   Total peers in session: ${message.peers.length}`);
-          console.log(`   Other peers (excluding self): ${otherPeerCount}`);
-
-          if (otherPeerCount === 0) {
-            console.log(`   ℹ️ All peers left. Waiting for others to join...`);
-          }
-
           handlePeerListUpdate(message.peers);
         } else if (message.type === "error") {
-          console.error("❌ Signaling error:", message.error);
+          console.error("Signaling error:", message.error);
           setConnectionError(message.error || "Unknown error");
           setConnectionState("failed");
         }
       });
     } catch (error) {
-      console.error("Failed to initialize:", error);
+      console.error("WebRTC init failed:", error);
       setConnectionError("Failed to connect to signaling server");
       setConnectionState("failed");
       hasInitializedRef.current = false;
@@ -829,11 +728,8 @@ export function useWebRTC() {
    * Cleanup all connections
    */
   const cleanup = useCallback(() => {
-    console.log("🧹 Cleaning up all WebRTC connections...");
-
     // Close all peer connections
-    peerConnectionsRef.current.forEach((state, peerId) => {
-      console.log(`   Closing connection to ${peerId}`);
+    peerConnectionsRef.current.forEach((state) => {
       if (state.dataChannel) {
         state.dataChannel.close();
       }
@@ -869,11 +765,8 @@ export function useWebRTC() {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        console.log("📱 Page became visible - checking connections...");
-
         // Check signaling connection
         if (signalingRef.current && !signalingRef.current.isConnected()) {
-          console.log("🔄 Signaling disconnected, reconnecting...");
           if (session && peerIdRef.current) {
             initialize();
           }
@@ -887,7 +780,6 @@ export function useWebRTC() {
             state.pc.connectionState === "failed" ||
             state.pc.connectionState === "disconnected"
           ) {
-            console.log(`🔄 Reconnecting to peer ${peerId.slice(0, 8)}...`);
             // Small delay to avoid race conditions
             setTimeout(() => {
               if (reconnectPeerRef.current) {
@@ -896,8 +788,6 @@ export function useWebRTC() {
             }, 1000);
           }
         });
-      } else {
-        console.log("📱 Page became hidden (screen off or tab switch)");
       }
     };
 
@@ -905,7 +795,6 @@ export function useWebRTC() {
 
     // Also handle page focus/blur for additional mobile support
     const handleFocus = () => {
-      console.log("📱 Page focused - checking connections...");
       handleVisibilityChange();
     };
 

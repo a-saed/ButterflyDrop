@@ -26,21 +26,9 @@ export function ShareLink({ url }: ShareLinkProps) {
       setQrSize(window.innerWidth < 640 ? 280 : 320);
     };
     updateQrSize();
-    window.addEventListener('resize', updateQrSize);
-    return () => window.removeEventListener('resize', updateQrSize);
+    window.addEventListener("resize", updateQrSize);
+    return () => window.removeEventListener("resize", updateQrSize);
   }, []);
-
-  // Log QR code URL whenever it changes
-  useEffect(() => {
-    if (url) {
-      console.log("🔗 [ShareLink] QR Code URL generated:");
-      console.log(`  - Full URL: ${url}`);
-      console.log(
-        `  - Session ID: ${url.split("#session=")[1] || "NOT FOUND"}`,
-      );
-      console.log(`  ✅ Scan this QR code to join session`);
-    }
-  }, [url]);
 
   const handleCopy = async () => {
     // Try modern clipboard API first
@@ -54,10 +42,13 @@ export function ShareLink({ url }: ShareLinkProps) {
           duration: 3000,
         });
         setTimeout(() => setCopied(false), 2000);
-        console.log("📋 [ShareLink] URL copied to clipboard:", url);
+
         return;
       } catch (error) {
-        console.warn("❌ [ShareLink] Clipboard API failed, trying fallback:", error);
+        console.warn(
+          "❌ [ShareLink] Clipboard API failed, trying fallback:",
+          error,
+        );
       }
     }
 
@@ -88,7 +79,6 @@ export function ShareLink({ url }: ShareLinkProps) {
           duration: 3000,
         });
         setTimeout(() => setCopied(false), 2000);
-        console.log("📋 [ShareLink] URL copied using fallback method");
       } else {
         throw new Error("execCommand failed");
       }
@@ -125,7 +115,9 @@ export function ShareLink({ url }: ShareLinkProps) {
         size="icon"
         onClick={handleCopy}
         className="shrink-0 transition-butterfly hover-lift h-9 w-9 sm:h-9 sm:w-9 touch-manipulation"
-        title={copied ? "Copied to clipboard!" : "Copy session URL to clipboard"}
+        title={
+          copied ? "Copied to clipboard!" : "Copy session URL to clipboard"
+        }
       >
         {copied ? (
           <Check className="h-4 w-4 text-green-500 animate-morph-success" />
@@ -166,11 +158,7 @@ export function ShareLink({ url }: ShareLinkProps) {
           </DialogHeader>
           <div className="flex flex-col items-center gap-4 py-4">
             <div className="p-3 sm:p-4 bg-white rounded-lg w-full max-w-[280px] sm:max-w-none flex items-center justify-center">
-              <QRCode 
-                value={url} 
-                size={qrSize} 
-                level="H"
-              />
+              <QRCode value={url} size={qrSize} level="H" />
             </div>
             <div className="text-sm text-muted-foreground text-center space-y-2">
               <p className="font-medium">Session URL:</p>

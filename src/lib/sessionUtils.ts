@@ -20,24 +20,9 @@ export function isValidSessionId(id: string): boolean {
  * Get session ID from URL
  */
 export function getSessionIdFromUrl(): string | null {
-  const fullUrl = window.location.href;
   const hash = window.location.hash.slice(1);
-
-  console.log(`[sessionUtils] 🔗 Extracting session ID from URL`);
-  console.log(`  - Full URL: ${fullUrl}`);
-  console.log(`  - Hash: ${hash}`);
-
   const params = new URLSearchParams(hash);
   const sessionId = params.get("session");
-
-  console.log(`  - Extracted session ID: ${sessionId || "NOT FOUND"}`);
-
-  if (sessionId) {
-    console.log(`  - ✅ Valid session ID found: ${sessionId}`);
-  } else {
-    console.log(`  - ❌ No session ID in URL`);
-  }
-
   return sessionId || null;
 }
 
@@ -65,15 +50,6 @@ export function createShareableUrl(sessionId: string): string {
 
   const baseUrl = `${protocol}//${accessibleHost}${port ? `:${port}` : ""}${window.location.pathname}`;
   const shareableUrl = `${baseUrl}#session=${sessionId}`;
-
-  console.log(`[sessionUtils] 🔗 Creating shareable URL`);
-  console.log(`  - Session ID: ${sessionId}`);
-  console.log(`  - Original hostname: ${hostname}`);
-  console.log(`  - Accessible host: ${accessibleHost}`);
-  console.log(`  - Base URL: ${baseUrl}`);
-  console.log(`  - Shareable URL: ${shareableUrl}`);
-  console.log(`  - ✅ QR code will contain: ${shareableUrl}`);
-
   return shareableUrl;
 }
 

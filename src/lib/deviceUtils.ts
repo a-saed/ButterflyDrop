@@ -110,12 +110,9 @@ export function generatePeerId(): string {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      console.log(
-        `[deviceUtils] 🔄 Reusing existing peer ID: ${stored.slice(0, 8)}...`,
-      );
       return stored;
     }
-  } catch (error) {
+  } catch {
     console.warn(
       "[deviceUtils] ⚠️ localStorage not available, generating new ID",
     );
@@ -129,10 +126,7 @@ export function generatePeerId(): string {
   // Store for future use
   try {
     localStorage.setItem(STORAGE_KEY, peerId);
-    console.log(
-      `[deviceUtils] 🆕 Generated and stored new peer ID: ${peerId.slice(0, 8)}...`,
-    );
-  } catch (error) {
+  } catch {
     console.warn("[deviceUtils] ⚠️ Could not store peer ID in localStorage");
   }
 

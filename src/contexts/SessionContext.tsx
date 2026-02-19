@@ -3,6 +3,7 @@ import {
   useContext,
   useState,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react";
 import type { Session, SessionState } from "@/types/session";
@@ -33,6 +34,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [peers, setPeers] = useState<PeerInfo[]>([]);
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
+  // Ref mirror of myPeerId so setPeersWithLogging doesn't need myPeerId in its
+  // dependency array (which would cause handlePeerListUpdate → initialize to
+  // recreate on every setMyPeerId call, triggering an effect cleanup that tears
+  // down the WebRTC connection while the session is still live).
+  const myPeerIdRef = useRef<string | null>(null);
 
   const createSession = useCallback((): Session => {
     const newSession: Session = {
@@ -41,7 +47,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       expiresAt: createSessionExpiration(1),
       role: "peer", // Modern P2P: all participants are equal peers
     };
-    console.log(`[SessionContext] Creating new P2P session: ${newSession.id}`);
     setSession(newSession);
     setError(null);
     return newSession;
@@ -54,13 +59,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       expiresAt: createSessionExpiration(1),
       role: "peer", // Modern P2P: all participants are equal peers
     };
-    console.log(`[SessionContext] Joining P2P session: ${sessionId}`);
     setSession(newSession);
     setError(null);
   }, []);
 
   const clearSession = useCallback(() => {
-    console.log(`[SessionContext] Clearing session`);
     setSession(null);
     setIsConnectedState(false);
     setPeerName(null);
@@ -70,50 +73,33 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setIsConnected = useCallback((connected: boolean) => {
-    console.log(`[SessionContext] Setting isConnected: ${connected}`);
     setIsConnectedState(connected);
   }, []);
 
-  const setPeersWithLogging = useCallback(
-    (newPeers: PeerInfo[]) => {
-      console.log(`[SessionContext] 📡 Setting peers:`, newPeers);
-      console.log(`  - Peer count: ${newPeers.length}`);
-      console.log(`  - Peer names: ${newPeers.map((p) => p.name).join(", ")}`);
-      console.log(
-        `  - Peer IDs (full): ${newPeers.map((p) => p.id).join(", ")}`,
-      );
-      console.log(
-        `  - Peer IDs (short): ${newPeers.map((p) => p.id.slice(0, 8)).join(", ")}`,
-      );
-      console.log(`  - My peer ID: ${myPeerId}`);
-      console.log(`  - My peer ID (short): ${myPeerId?.slice(0, 8)}`);
-      console.log(`  - Setting peers at:`, new Date().toLocaleTimeString());
-
+  // IMPORTANT: keep dep array empty so this function reference is stable for
+  // the lifetime of the provider. myPeerIdRef.current is used for any checks
+  // that need the current peer ID at call-time without recreating the callback.
+  const setPeersWithLogging = useCallback((newPeers: PeerInfo[]) => {
+    if (import.meta.env.DEV) {
       // Check for timing issues
-      if (newPeers.length > 0 && !myPeerId) {
+      if (newPeers.length > 0 && !myPeerIdRef.current) {
         console.warn(
           `[SessionContext] ⚠️ WARNING: Peers received but myPeerId not set yet!`,
         );
       }
-
       // Check if any peer matches myPeerId
-      const matchesSelf = newPeers.some((p) => p.id === myPeerId);
+      const matchesSelf = newPeers.some((p) => p.id === myPeerIdRef.current);
       if (matchesSelf) {
         console.warn(
           `[SessionContext] ⚠️ WARNING: Peer list includes self! This should be filtered.`,
         );
       }
-
-      setPeers(newPeers);
-      console.log(`[SessionContext] ✅ Peers state updated`);
-    },
-    [myPeerId],
-  );
+    }
+    setPeers(newPeers);
+  }, []); // ← stable: no deps, uses ref for runtime checks
 
   const setMyPeerIdWithLogging = useCallback((peerId: string) => {
-    console.log(
-      `[SessionContext] Setting myPeerId: ${peerId} at ${new Date().toLocaleTimeString()}`,
-    );
+    myPeerIdRef.current = peerId;
     setMyPeerId(peerId);
   }, []);
 

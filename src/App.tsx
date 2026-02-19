@@ -6,7 +6,7 @@ import { ConnectionProvider } from "@/contexts/ConnectionContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { useSession } from "@/hooks/useSession";
 import { usePeerDiscovery } from "@/hooks/usePeerDiscovery";
-import { useWebRTC } from "@/hooks/useWebRTC_v2";
+import { WebRTCProvider, useWebRTCContext } from "@/contexts/WebRTCContext";
 import { useFileTransfer } from "@/hooks/useFileTransfer";
 import { useConnection } from "@/contexts/ConnectionContext";
 import { AmbientBackground } from "@/components/layout/AmbientBackground";
@@ -50,7 +50,7 @@ function AppContent() {
     getQueuedMessagesForPeer,
     isPeerReady,
     readyPeers,
-  } = useWebRTC();
+  } = useWebRTCContext();
   const {
     playConnect,
     playTransferStart,
@@ -713,7 +713,12 @@ function App() {
     <ThemeProvider>
       <SessionProvider>
         <ConnectionProvider>
-          <AppContent />
+          {/* WebRTCProvider ensures useWebRTC() is instantiated exactly once.
+              All hooks/components that need WebRTC state must use
+              useWebRTCContext() instead of calling useWebRTC() directly. */}
+          <WebRTCProvider>
+            <AppContent />
+          </WebRTCProvider>
         </ConnectionProvider>
       </SessionProvider>
     </ThemeProvider>

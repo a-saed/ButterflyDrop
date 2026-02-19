@@ -27,7 +27,7 @@ import {
 } from "@/lib/syncEngine";
 import { syncProtocol } from "@/services/syncProtocol";
 import { useSession } from "@/contexts/SessionContext";
-import { useWebRTC } from "./useWebRTC_v2";
+import { useWebRTCContext } from "@/contexts/WebRTCContext";
 import { useFileTransfer } from "./useFileTransfer";
 import { toast } from "sonner";
 
@@ -59,17 +59,9 @@ class AsyncQueue {
 }
 
 export function useFolderSync() {
-  const { session, peers } = useSession();
-  const { getDataChannelForPeer, isPeerReady, readyPeers } = useWebRTC();
+  const { session } = useSession();
+  const { getDataChannelForPeer, isPeerReady } = useWebRTCContext();
   const { sendFiles } = useFileTransfer();
-
-  // Debug: log peers and ready peers
-  console.log("🔍 useFolderSync state:", {
-    peersCount: peers.length,
-    peers: peers.map((p) => ({ id: p.id, name: p.name, online: p.isOnline })),
-    readyPeersCount: readyPeers?.length || 0,
-    readyPeerIds: readyPeers || [],
-  });
 
   const [syncConfigs, setSyncConfigs] = useState<SyncConfig[]>([]);
   const [syncStates, setSyncStates] = useState<Map<string, SyncState>>(
