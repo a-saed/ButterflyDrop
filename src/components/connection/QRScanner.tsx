@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ScanLine, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { isValidSessionId } from "@/lib/sessionUtils";
@@ -12,10 +18,10 @@ interface QRScannerProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-export function QRScanner({ 
-  onScanSuccess, 
+export function QRScanner({
+  onScanSuccess,
   isOpen: controlledOpen,
-  onOpenChange 
+  onOpenChange,
 }: QRScannerProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
@@ -68,7 +74,11 @@ export function QRScanner({
       let cameraId: string | null = null;
       try {
         // Find back camera (environment facing)
-        const backCamera = devices.find((d) => d.label.toLowerCase().includes("back") || d.label.toLowerCase().includes("rear"));
+        const backCamera = devices.find(
+          (d) =>
+            d.label.toLowerCase().includes("back") ||
+            d.label.toLowerCase().includes("rear"),
+        );
         if (backCamera) {
           cameraId = backCamera.id;
           console.log("📷 Using back camera:", backCamera.label);
@@ -98,10 +108,10 @@ export function QRScanner({
         (decodedText) => {
           // Successfully scanned
           console.log("✅ QR Code scanned:", decodedText);
-          
+
           // Extract session ID from URL
           let sessionId: string | null = null;
-          
+
           try {
             // Try to parse as URL first
             const url = new URL(decodedText);
@@ -114,7 +124,9 @@ export function QRScanner({
               sessionId = decodedText;
             } else {
               // Try to extract session ID from any string format
-              const match = decodedText.match(/session[=:]([A-Za-z0-9_-]{8,16})/i);
+              const match = decodedText.match(
+                /session[=:]([A-Za-z0-9_-]{8,16})/i,
+              );
               if (match) {
                 sessionId = match[1];
               }
@@ -126,16 +138,17 @@ export function QRScanner({
               description: `Joining session...`,
               icon: "🦋",
             });
-            
+
             // Stop scanner
             stopScanner();
             setIsOpen(false);
-            
+
             // Call success handler
             onScanSuccess(sessionId);
           } else {
             toast.error("Invalid QR code", {
-              description: "This doesn't appear to be a Butterfly Drop session QR code",
+              description:
+                "This doesn't appear to be a Butterfly Drop session QR code",
             });
           }
         },
@@ -143,13 +156,13 @@ export function QRScanner({
           // Scanning error (not a fatal error, just no QR code detected yet)
           // Don't show errors for normal scanning - this is expected
           console.log("Scanning...", errorMessage);
-        }
+        },
       );
-      
+
       console.log("✅ Camera started successfully");
     } catch (err) {
       console.error("❌ Error starting scanner:", err);
-      
+
       let errorMessage = "Unknown error";
       if (err instanceof Error) {
         errorMessage = err.message;
@@ -158,19 +171,31 @@ export function QRScanner({
       }
 
       // Better error messages
-      if (errorMessage.includes("Permission denied") || 
-          errorMessage.includes("NotAllowedError") ||
-          errorMessage.includes("NotAllowed")) {
-        setError("Camera permission denied. Please allow camera access in your browser settings and try again.");
-      } else if (errorMessage.includes("NotFoundError") || 
-                 errorMessage.includes("no camera") ||
-                 errorMessage.includes("No camera")) {
+      if (
+        errorMessage.includes("Permission denied") ||
+        errorMessage.includes("NotAllowedError") ||
+        errorMessage.includes("NotAllowed")
+      ) {
+        setError(
+          "Camera permission denied. Please allow camera access in your browser settings and try again.",
+        );
+      } else if (
+        errorMessage.includes("NotFoundError") ||
+        errorMessage.includes("no camera") ||
+        errorMessage.includes("No camera")
+      ) {
         setError("No camera found. Please use a device with a camera.");
-      } else if (errorMessage.includes("NotReadableError") ||
-                 errorMessage.includes("TrackStartError")) {
-        setError("Camera is already in use by another application. Please close other apps using the camera.");
+      } else if (
+        errorMessage.includes("NotReadableError") ||
+        errorMessage.includes("TrackStartError")
+      ) {
+        setError(
+          "Camera is already in use by another application. Please close other apps using the camera.",
+        );
       } else if (errorMessage.includes("OverconstrainedError")) {
-        setError("Camera doesn't support required settings. Trying with default settings...");
+        setError(
+          "Camera doesn't support required settings. Trying with default settings...",
+        );
         // Retry with simpler config
         setTimeout(() => {
           startScannerWithFallback();
@@ -178,14 +203,19 @@ export function QRScanner({
         return;
       } else {
         // Check if HTTPS is required
-        const isSecureContext = window.isSecureContext || location.protocol === "https:" || location.hostname === "localhost";
-        const httpsMessage = !isSecureContext 
+        const isSecureContext =
+          window.isSecureContext ||
+          location.protocol === "https:" ||
+          location.hostname === "localhost";
+        const httpsMessage = !isSecureContext
           ? " Camera access requires HTTPS. Please use https:// or localhost."
           : "";
-        
-        setError(`Failed to start camera: ${errorMessage}.${httpsMessage} Please check browser permissions and try again.`);
+
+        setError(
+          `Failed to start camera: ${errorMessage}.${httpsMessage} Please check browser permissions and try again.`,
+        );
       }
-      
+
       setIsScanning(false);
       scannerRef.current = null;
     }
@@ -219,7 +249,9 @@ export function QRScanner({
             if (isValidSessionId(decodedText)) {
               sessionId = decodedText;
             } else {
-              const match = decodedText.match(/session[=:]([A-Za-z0-9_-]{8,16})/i);
+              const match = decodedText.match(
+                /session[=:]([A-Za-z0-9_-]{8,16})/i,
+              );
               if (match) sessionId = match[1];
             }
           }
@@ -234,11 +266,13 @@ export function QRScanner({
             onScanSuccess(sessionId);
           }
         },
-        () => {}
+        () => {},
       );
     } catch (err) {
       console.error("Fallback scanner also failed:", err);
-      setError("Unable to access camera. Please check browser permissions and ensure you're using HTTPS (required for camera access).");
+      setError(
+        "Unable to access camera. Please check browser permissions and ensure you're using HTTPS (required for camera access).",
+      );
       setIsScanning(false);
       scannerRef.current = null;
     }
@@ -281,7 +315,7 @@ export function QRScanner({
         variant="outline"
         size="icon"
         onClick={() => setIsOpen(true)}
-        className="shrink-0 transition-butterfly hover-lift h-9 w-9 sm:h-9 sm:w-9 touch-manipulation"
+        className="shrink-0 h-8 w-8 touch-manipulation transition-all"
         title="Scan QR code - open camera to scan a session QR code"
       >
         <ScanLine className="h-4 w-4" />
@@ -337,4 +371,3 @@ export function QRScanner({
     </>
   );
 }
-

@@ -109,12 +109,12 @@ export function ShareLink({ url }: ShareLinkProps) {
   };
 
   return (
-    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+    <div className="flex items-center gap-1">
       <Button
         variant="outline"
         size="icon"
         onClick={handleCopy}
-        className="shrink-0 transition-butterfly hover-lift h-9 w-9 sm:h-9 sm:w-9 touch-manipulation"
+        className="shrink-0 h-8 w-8 touch-manipulation transition-all"
         title={
           copied ? "Copied to clipboard!" : "Copy session URL to clipboard"
         }
@@ -131,7 +131,7 @@ export function ShareLink({ url }: ShareLinkProps) {
           variant="outline"
           size="icon"
           onClick={handleShare}
-          className="shrink-0 transition-butterfly hover-lift h-9 w-9 sm:h-9 sm:w-9 touch-manipulation"
+          className="shrink-0 h-8 w-8 touch-manipulation transition-all"
           title="Share session link via native share dialog"
         >
           <Share2 className="h-4 w-4" />
@@ -143,7 +143,7 @@ export function ShareLink({ url }: ShareLinkProps) {
           <Button
             variant="outline"
             size="icon"
-            className="shrink-0 transition-butterfly hover-lift h-9 w-9 sm:h-9 sm:w-9 touch-manipulation"
+            className="shrink-0 h-8 w-8 touch-manipulation transition-all"
             title="Show QR code - scan with another device to join"
           >
             <QrCode className="h-4 w-4" />
