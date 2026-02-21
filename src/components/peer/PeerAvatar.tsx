@@ -5,7 +5,6 @@ import {
   Laptop,
   Loader2,
   Check,
-  FolderSync,
   Send,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -27,7 +26,6 @@ interface PeerAvatarProps {
   onClick?: () => void;
   hasFiles?: boolean;
   isReady?: boolean;
-  onSyncClick?: () => void;
 }
 
 const deviceIcons = {
@@ -80,7 +78,6 @@ export function PeerAvatar({
   onClick,
   hasFiles,
   isReady = false,
-  onSyncClick,
 }: PeerAvatarProps) {
   const Icon = deviceIcons[peer.deviceType];
   const [imageError, setImageError] = useState(false);
@@ -267,28 +264,6 @@ export function PeerAvatar({
             : "Connecting…"}
         </span>
       </div>
-
-      {/* Sync folder button — always visible when peer is ready, appears below the label */}
-      {isReady && onSyncClick && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onSyncClick();
-          }}
-          className={cn(
-            "flex items-center gap-1 px-2.5 py-1 rounded-full",
-            "bg-background/90 backdrop-blur-sm border border-border/60",
-            "text-[11px] font-medium text-muted-foreground",
-            "shadow-sm hover:shadow-md hover:bg-primary/10 hover:border-primary/50 hover:text-primary",
-            "transition-all duration-200",
-            "opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0",
-          )}
-          title={`Sync a folder with ${peer.name}`}
-        >
-          <FolderSync className="h-3 w-3" />
-          Sync folder
-        </button>
-      )}
     </div>
   );
 }

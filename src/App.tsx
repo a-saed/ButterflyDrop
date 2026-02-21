@@ -27,19 +27,18 @@ import {
   Send,
   Github,
   RefreshCw,
-  X,
   AlertTriangle,
   CheckCircle2,
-  FolderSync,
   Loader2,
   FileUp,
   Link2,
   ChevronDown,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDropzone } from "react-dropzone";
 import { useSoundEffects } from "@/hooks/useSoundEffects";
-import { SyncSheet } from "@/components/sync/SyncSheet";
+
 // BDP — Butterfly Delta Protocol
 import { useBDP } from "@/bdp/hooks/useBDP";
 import { SyncDashboard } from "@/bdp/components/SyncDashboard";
@@ -52,9 +51,18 @@ import { VaultBrowser } from "@/bdp/components/VaultBrowser";
 import { ConflictResolver } from "@/bdp/components/ConflictResolver";
 import { SyncProgress } from "@/bdp/components/SyncProgress";
 import type { PairId } from "@/types/bdp";
-
 import type { QRPayload } from "@/bdp/components/AddPairDialog";
 import { cn } from "@/lib/utils";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tab type
+// ─────────────────────────────────────────────────────────────────────────────
+
+type AppTab = "send" | "sync";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AppContent
+// ─────────────────────────────────────────────────────────────────────────────
 
 function AppContent() {
   const {
@@ -80,26 +88,21 @@ function AppContent() {
     playError,
   } = useSoundEffects();
 
-  // File transfer with new API
+  // File transfer state
   const {
-    // Sending state
     isSending,
     sendingToPeer,
     sendProgress,
     sendComplete,
     sendError,
     sendCompletePeerName,
-    // Receiving state
     isReceiving,
     receiveProgress,
     receiveComplete,
     receiveError,
     receiveCompletePeerName,
-    // Incoming transfer
     incomingTransfer,
-    // Received files
     receivedFiles,
-    // Actions
     sendFiles,
     setupReceiver,
     downloadFile,
@@ -111,14 +114,16 @@ function AppContent() {
     formatBytes,
   } = useFileTransfer();
 
+  // ── UI state ────────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<AppTab>(() =>
+    new URLSearchParams(window.location.search).get("bdp") ? "sync" : "send",
+  );
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedPeerId, setSelectedPeerId] = useState<string>();
-  const [syncPeerId, setSyncPeerId] = useState<string | null>(null);
 
   // ── BDP Sync ────────────────────────────────────────────────────────────────
   const bdp = useBDP({ getDataChannelForPeer, readyPeers });
 
-  // Lazy-init: read ?bdp= once on first render — avoids setState-in-effect
   const [autoJoinPayload, setAutoJoinPayload] = useState<QRPayload | null>(
     () => {
       const bdpParam = new URLSearchParams(window.location.search).get("bdp");
@@ -130,30 +135,23 @@ function AppContent() {
       }
     },
   );
-  const [bdpPanelOpen, setBdpPanelOpen] = useState(() => {
-    return !!new URLSearchParams(window.location.search).get("bdp");
-  });
+
+  // If app was opened via a ?bdp= link, jump straight to Sync tab
   const [addPairOpen, setAddPairOpen] = useState(() => {
     return !!new URLSearchParams(window.location.search).get("bdp");
   });
-  /** null = show dashboard, PairId = show vault for that pair */
+
   const [vaultPairId, setVaultPairId] = useState<PairId | null>(null);
-  /**
-   * Which pair's conflict resolver to show (null = none).
-   * Derived from engineStates so it always reflects the live session phase;
-   * the user can manually dismiss it by clicking "Defer".
-   */
   const [dismissedConflictPairs, setDismissedConflictPairs] = useState<
     Set<PairId>
   >(new Set());
 
-  // Register BDP frame handler into useFileTransfer so BDP messages are
-  // intercepted before the legacy protocol parser runs.
+  // Register BDP frame handler
   useEffect(() => {
     return registerBDPHandler(bdp.handleFrame);
   }, [registerBDPHandler, bdp.handleFrame]);
 
-  // ── Strip ?bdp= from the URL after reading it on mount ───────────────────
+  // Strip ?bdp= from URL after reading it
   useEffect(() => {
     if (!autoJoinPayload) return;
     const cleanUrl =
@@ -163,11 +161,6 @@ function AppContent() {
     window.history.replaceState(null, "", cleanUrl || window.location.pathname);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /**
-   * Derive the pairId whose conflict resolver should be shown.
-   * Picks the first pair that is in resolving_conflict phase and has not been
-   * dismissed by the user.  Pure derivation — no setState, no refs.
-   */
   const activeConflictPairId = useMemo<PairId | null>(() => {
     for (const [pairId, state] of bdp.engineStates.entries()) {
       if (
@@ -181,19 +174,13 @@ function AppContent() {
     return null;
   }, [bdp.engineStates, dismissedConflictPairs]);
 
-  // Track which peers have receivers set up
+  // ── Peer & connection tracking refs ────────────────────────────────────────
   const setupPeersRef = useRef<Set<string>>(new Set());
-  // Track which peers we've already shown a "connected" toast for
-  // (separate from setupPeersRef so reconnects can re-toast correctly)
   const toastedPeersRef = useRef<Set<string>>(new Set());
-  // Track readyPeers from the previous render to detect departures
   const previousReadyPeersRef = useRef<string[]>([]);
-  // Track if we've already shown connection failed toast
   const connectionFailedToastShownRef = useRef(false);
   const previousConnectionStateRef = useRef<string | null>(null);
-  // Track which sessions we've already joined (to prevent duplicate toasts)
   const joinedSessionsRef = useRef<Set<string>>(new Set());
-  // Dedup refs for error toasts — only re-toast when the message actually changes
   const previousSendErrorRef = useRef<string | null>(null);
   const previousReceiveErrorRef = useRef<string | null>(null);
 
@@ -201,242 +188,163 @@ function AppContent() {
     ? createShareableUrl(session.session.id)
     : "";
 
-  // Handle QR code scan success
+  // ── QR scan handler ─────────────────────────────────────────────────────────
   const handleQRScanSuccess = useCallback(
     (sessionId: string) => {
-      // Prevent duplicate joins - check if already in this session
-      if (session.session?.id === sessionId) {
-        console.log(`⚠️ Already in session ${sessionId}, skipping`);
-        return;
-      }
-
-      // Prevent duplicate joins from QR scanner
-      if (joinedSessionsRef.current.has(sessionId)) {
-        console.log(`⚠️ Already joined session ${sessionId}, skipping`);
-        return;
-      }
-
-      console.log(`📱 QR Code scanned, joining session: ${sessionId}`);
-
-      // Mark as joined before calling joinSession
+      if (joinedSessionsRef.current.has(sessionId)) return;
       joinedSessionsRef.current.add(sessionId);
-
-      // Join the session
       joinSession(sessionId);
-
-      // Update URL to reflect the new session
-      const newHash = `#session=${sessionId}`;
-      window.history.replaceState(null, "", newHash);
-
-      toast.success("Session joined!", {
-        description: "Connecting to peers...",
-        icon: "🦋",
-      });
+      const newHash = `#${sessionId}`;
+      if (window.location.hash !== newHash) {
+        window.history.pushState(null, "", newHash);
+      }
+      const description = "Connecting…";
+      const icon = "📱";
+      toast.success("Session joined", { description, icon, duration: 3000 });
     },
-    [joinSession, session.session],
+    [joinSession],
   );
 
-  // Setup file receiver for all ready peers
-  // This is CRITICAL - must set up onmessage handler before files arrive
-  useEffect(() => {
-    // ── Cleanup stale entries ────────────────────────────────────────────────
-    // When a peer disconnects and later reconnects, readyPeers first removes
-    // the peerId, then adds it again. Without this cleanup, setupPeersRef
-    // still holds the old peerId so setupReceiver is never called for the new
-    // data channel, and messages arrive silently with no handler.
-    const currentReadySet = new Set(readyPeers);
-    setupPeersRef.current.forEach((id) => {
-      if (!currentReadySet.has(id)) {
-        setupPeersRef.current.delete(id);
-        // Also clear the internal setupChannelsRef inside useFileTransfer so
-        // setupReceiver is allowed to run again for the new channel.
-        cleanupPeer(id);
-      }
-    });
+  // ── Effect: set up receivers for new ready peers ────────────────────────────
 
-    if (session.session && readyPeers.length > 0) {
-      readyPeers.forEach((peerId) => {
-        // Skip if already set up for this connection
-        if (setupPeersRef.current.has(peerId)) return;
-
-        const dataChannel = getDataChannelForPeer(peerId);
-        if (dataChannel && dataChannel.readyState === "open") {
-          const peer = peers.find((p) => p.id === peerId);
-          const peerName = peer?.name || "Unknown Device";
-
-          // Get any messages that were queued before we set up the handler
-          const queuedMessages = getQueuedMessagesForPeer(peerId);
-
-          console.log(`🔧 Setting up receiver for ${peerName} (${peerId})`);
-          setupReceiver(peerId, peerName, dataChannel, queuedMessages);
-          setupPeersRef.current.add(peerId);
-        }
-      });
-    }
-  }, [
-    session.session,
-    readyPeers,
-    peers,
-    getDataChannelForPeer,
-    getQueuedMessagesForPeer,
-    setupReceiver,
-    cleanupPeer,
-  ]);
-
-  // Track previous ready peers count for sound effects
-  const previousReadyPeersCountRef = useRef(0);
-  // Gate send / receive one-shot toasts
   const previousSendCompleteRef = useRef(false);
   const previousReceiveCompleteRef = useRef(false);
 
-  // ─── Connection status toasts ────────────────────────────────────────────
   useEffect(() => {
     const previousState = previousConnectionStateRef.current;
     previousConnectionStateRef.current = connectionState;
 
-    // Detect peers that LEFT readyPeers so we can allow re-toasting on reconnect
+    if (
+      connectionState === "failed" &&
+      previousState !== "failed" &&
+      !connectionFailedToastShownRef.current
+    ) {
+      connectionFailedToastShownRef.current = true;
+      toast.error("Connection failed", {
+        description: "Could not establish a peer connection.",
+        duration: 5000,
+      });
+    }
+    if (connectionState !== "failed") {
+      connectionFailedToastShownRef.current = false;
+    }
+  }, [connectionState]);
+
+  useEffect(() => {
     const currentSet = new Set(readyPeers);
-    previousReadyPeersRef.current.forEach((id) => {
-      if (!currentSet.has(id)) {
-        toastedPeersRef.current.delete(id);
-      }
-    });
-    previousReadyPeersRef.current = [...readyPeers];
+    const previousSet = new Set(previousReadyPeersRef.current);
 
-    if (readyPeers.length > 0) {
-      // Only toast peers we haven't toasted yet in this session
-      const newPeers = readyPeers.filter(
-        (id) => !toastedPeersRef.current.has(id),
-      );
+    const newPeers = readyPeers.filter((id) => !previousSet.has(id));
+    const goneIds = previousReadyPeersRef.current.filter(
+      (id) => !currentSet.has(id),
+    );
 
-      if (newPeers.length > 0) {
-        const peerNames = peers
-          .filter((p) => newPeers.includes(p.id))
-          .map((p) => p.name)
-          .join(", ");
+    newPeers.forEach((id) => {
+      const peer = peers.find((p) => p.id === id);
+      const peerName = peer?.name ?? "A device";
 
-        // Mark as toasted BEFORE firing so re-renders can't double-fire
-        newPeers.forEach((id) => toastedPeersRef.current.add(id));
-
-        if (peerNames) {
-          toast.success(`Connected with ${peerNames}`, {
-            // Stable ID prevents stacking duplicate toasts
-            id: `peer-connected-${newPeers.sort().join("-")}`,
-            icon: "🦋",
-            duration: 3000,
-          });
-          if (readyPeers.length > previousReadyPeersCountRef.current) {
-            playConnect();
-          }
+      if (!setupPeersRef.current.has(id)) {
+        setupPeersRef.current.add(id);
+        const dataChannel = getDataChannelForPeer(id);
+        if (dataChannel && dataChannel.readyState === "open") {
+          const queuedMessages = getQueuedMessagesForPeer(id);
+          setupReceiver(id, peerName, dataChannel, queuedMessages);
         }
       }
 
-      previousReadyPeersCountRef.current = readyPeers.length;
-      connectionFailedToastShownRef.current = false;
-    } else if (connectionState === "failed" && previousState !== "failed") {
-      if (!connectionFailedToastShownRef.current) {
-        connectionFailedToastShownRef.current = true;
-        toastedPeersRef.current.clear();
-        toast.error("Connection failed", {
-          id: "connection-failed",
-          description: "Check your network and try refreshing",
-          duration: 5000,
+      if (!toastedPeersRef.current.has(id)) {
+        toastedPeersRef.current.add(id);
+        playConnect();
+        toast.success(`${peerName} connected`, {
+          id: `connected-${id}`,
+          icon: "🔗",
+          duration: 3000,
         });
-        playError();
       }
-    } else if (connectionState !== "failed") {
-      connectionFailedToastShownRef.current = false;
-    }
-  }, [connectionState, readyPeers, peers, playConnect, playError]);
+    });
 
-  // ─── Send error toast ────────────────────────────────────────────────────
-  // Only re-fires when the error *message* changes, not on every re-render
-  useEffect(() => {
-    if (sendError && sendError !== previousSendErrorRef.current) {
-      previousSendErrorRef.current = sendError;
-      toast.error("Send failed", {
-        id: "send-error",
-        description: sendError,
-        duration: 5000,
+    goneIds.forEach((id) => {
+      const peer = peers.find((p) => p.id === id);
+      const peerName = peer?.name ?? "A device";
+      setupPeersRef.current.delete(id);
+      toastedPeersRef.current.delete(id);
+      cleanupPeer(id);
+      toast.info(`${peerName} disconnected`, {
+        id: `disconnected-${id}`,
+        icon: "👋",
+        duration: 3000,
       });
-      playError();
-    } else if (!sendError) {
-      previousSendErrorRef.current = null;
-      toast.dismiss("send-error");
-    }
-  }, [sendError, playError]);
+      if (selectedPeerId === id) setSelectedPeerId(undefined);
+    });
 
-  // ─── Receive error toast ─────────────────────────────────────────────────
-  useEffect(() => {
-    if (receiveError && receiveError !== previousReceiveErrorRef.current) {
-      previousReceiveErrorRef.current = receiveError;
-      toast.error("Receive failed", {
-        id: "receive-error",
-        description: receiveError,
-        duration: 5000,
-      });
-      playError();
-    } else if (!receiveError) {
-      previousReceiveErrorRef.current = null;
-      toast.dismiss("receive-error");
-    }
-  }, [receiveError, playError]);
+    previousReadyPeersRef.current = readyPeers;
+  }, [
+    readyPeers,
+    peers,
+    setupReceiver,
+    getDataChannelForPeer,
+    getQueuedMessagesForPeer,
+    cleanupPeer,
+    playConnect,
+    selectedPeerId,
+  ]);
 
-  // ─── Send complete toast ─────────────────────────────────────────────────
-  // Fires exactly once per transfer; resets when sendComplete goes false
+  // Toast on send complete
   useEffect(() => {
     if (sendComplete && !previousSendCompleteRef.current) {
       previousSendCompleteRef.current = true;
       playSuccess();
-      const peerName = sendCompletePeerName || "peer";
-      toast.success(`Files sent to ${peerName}!`, {
+      const peerName = sendCompletePeerName ?? "peer";
+      const fileCount = selectedFiles.length || 1;
+      toast.success(`${fileCount} file${fileCount !== 1 ? "s" : ""} sent!`, {
         id: "send-complete",
-        icon: "🦋",
+        icon: "🎉",
+        description: `Successfully sent to ${peerName}`,
         duration: 4000,
       });
-    } else if (!sendComplete) {
-      previousSendCompleteRef.current = false;
     }
-  }, [sendComplete, sendCompletePeerName, playSuccess]);
+    if (!sendComplete) previousSendCompleteRef.current = false;
+  }, [sendComplete, sendProgress, sendCompletePeerName, playSuccess]);
 
-  // ─── Receive complete toast ──────────────────────────────────────────────
-  // THE FIX: gate the toast AND the sound behind the ref so that any
-  // subsequent re-renders while receiveComplete is still true (common on
-  // mobile due to peer-list churn) cannot fire another toast.
+  // Toast on receive complete
   useEffect(() => {
-    if (
-      receiveComplete &&
-      receivedFiles.length > 0 &&
-      !previousReceiveCompleteRef.current
-    ) {
-      // Set guard FIRST — before any async work
+    if (receiveComplete && !previousReceiveCompleteRef.current) {
       previousReceiveCompleteRef.current = true;
-
-      const fileCount = receivedFiles.length;
-      const peerName = receiveCompletePeerName || "peer";
-
-      toast.success(
-        `${fileCount} file${fileCount > 1 ? "s" : ""} received from ${peerName}!`,
-        {
-          id: "receive-complete",
-          icon: "✅",
-          description: "Tap below to download",
-          duration: 6000,
-        },
-      );
       playFileReceived();
-    } else if (!receiveComplete) {
-      previousReceiveCompleteRef.current = false;
-      toast.dismiss("receive-complete");
+      toast.success("Files received!", {
+        id: "receive-complete",
+        icon: "📥",
+        description: `From ${receiveCompletePeerName ?? "peer"}`,
+        duration: 4000,
+      });
     }
-  }, [
-    receiveComplete,
-    receivedFiles.length,
-    receiveCompletePeerName,
-    playFileReceived,
-  ]);
+    if (!receiveComplete) previousReceiveCompleteRef.current = false;
+  }, [receiveComplete, receiveCompletePeerName, playFileReceived]);
 
-  // File drop handling
+  // Toast on send error
+  useEffect(() => {
+    if (sendError && sendError !== previousSendErrorRef.current) {
+      previousSendErrorRef.current = sendError;
+      playError();
+      toast.error("Send failed", { description: sendError, duration: 5000 });
+    }
+    if (!sendError) previousSendErrorRef.current = null;
+  }, [sendError, playError]);
+
+  // Toast on receive error
+  useEffect(() => {
+    if (receiveError && receiveError !== previousReceiveErrorRef.current) {
+      previousReceiveErrorRef.current = receiveError;
+      playError();
+      toast.error("Receive failed", {
+        description: receiveError,
+        duration: 5000,
+      });
+    }
+    if (!receiveError) previousReceiveErrorRef.current = null;
+  }, [receiveError, playError]);
+
+  // ── File drop (global drag-over-app) ───────────────────────────────────────
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       setSelectedFiles((prev) => [...prev, ...acceptedFiles]);
@@ -465,25 +373,20 @@ function AppContent() {
     if (selectedFiles.length === 0) return;
     if (!selectedPeerId) {
       toast.error("No peer selected", {
-        description: "Click on a device to select it",
+        description: "Tap a connected device to select it",
       });
       return;
     }
-
     const peer = peers.find((p) => p.id === selectedPeerId);
     const peerName = peer?.name || "peer";
-
-    // Check if peer connection is ready
     if (!isPeerReady(selectedPeerId)) {
-      toast.info(`Connecting to ${peerName}...`, {
-        description: "Wait for the connection to be established",
+      toast.info(`Connecting to ${peerName}…`, {
+        description: "Please wait a moment",
         icon: "⏳",
         duration: 3000,
       });
       return;
     }
-
-    // Get data channel for this peer
     const dataChannel = getDataChannelForPeer(selectedPeerId);
     if (!dataChannel || dataChannel.readyState !== "open") {
       toast.error(`Cannot connect to ${peerName}`, {
@@ -492,19 +395,12 @@ function AppContent() {
       });
       return;
     }
-
     try {
-      // Play transfer start sound
       playTransferStart();
       await sendFiles(selectedFiles, dataChannel, selectedPeerId, peerName);
-
-      // Clear files after successful transfer
-      setTimeout(() => {
-        setSelectedFiles([]);
-      }, 2000);
+      setTimeout(() => setSelectedFiles([]), 2000);
     } catch (error) {
       console.error("Failed to send files:", error);
-      // Error is already shown via sendError state
     }
   }, [
     selectedFiles,
@@ -530,33 +426,44 @@ function AppContent() {
     [selectedFiles, peers],
   );
 
-  const handleSyncWithPeer = useCallback((peerId: string) => {
-    setSyncPeerId(peerId);
-  }, []);
-
   // Auto-select first peer when peers are discovered
   useEffect(() => {
     if (peers.length > 0 && !selectedPeerId) {
-      const timer = setTimeout(() => {
-        setSelectedPeerId(peers[0].id);
-      }, 100);
+      const timer = setTimeout(() => setSelectedPeerId(peers[0].id), 100);
       return () => clearTimeout(timer);
     }
   }, [peers, selectedPeerId]);
 
-  // Can send if have files and peer selected and not already transferring
   const canSend =
     selectedFiles.length > 0 &&
     !isSending &&
     selectedPeerId &&
     isPeerReady(selectedPeerId);
 
-  // Get selected peer name
   const selectedPeerName = selectedPeerId
     ? peers.find((p) => p.id === selectedPeerId)?.name || "peer"
     : "";
 
-  // ── BDP panel helpers ─────────────────────────────────────────────────────
+  // ── BDP badge counts ────────────────────────────────────────────────────────
+  const bdpConflictCount = useMemo(
+    () =>
+      [...bdp.engineStates.values()].filter(
+        (s) => s.phase === "resolving_conflict",
+      ).length,
+    [bdp.engineStates],
+  );
+  const bdpSyncingCount = useMemo(
+    () =>
+      [...bdp.engineStates.values()].filter(
+        (s) =>
+          s.phase === "transferring" ||
+          s.phase === "diffing" ||
+          s.phase === "delta_sync" ||
+          s.phase === "full_sync",
+      ).length,
+    [bdp.engineStates],
+  );
+
   const bdpConflictState = activeConflictPairId
     ? bdp.engineStates.get(activeConflictPairId)
     : undefined;
@@ -564,20 +471,19 @@ function AppContent() {
     ? (bdp.pairs.find((p) => p.pairId === vaultPairId) ?? null)
     : null;
 
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen relative" {...getRootProps()}>
       <input {...getInputProps()} />
 
-      {/* Server Warm-up Overlay — shown only during cold-start, never for warm servers */}
       {showWarmupOverlay && (
         <ServerWarmupOverlay status={warmupStatus} elapsed={warmupElapsed} />
       )}
 
-      {/* Ambient Background */}
       <AmbientBackground />
 
-      {/* Drag Overlay */}
-      {isDragActive && (
+      {/* Global drag overlay — only shown on the Send tab */}
+      {isDragActive && activeTab === "send" && (
         <div
           className="fixed inset-0 bg-primary/10 backdrop-blur-sm flex items-center justify-center"
           style={{ zIndex: 50 }}
@@ -591,28 +497,76 @@ function AppContent() {
         </div>
       )}
 
-      {/* Main Content */}
+      {/* ── App shell ── */}
       <div
         className="relative min-h-screen flex flex-col"
         style={{ zIndex: 10 }}
       >
-        {/* Header */}
-        <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 p-4 sm:p-6 border-b border-border/50 backdrop-blur-sm bg-background/50">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        {/* ── Header ── */}
+        <header className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b border-border/50 backdrop-blur-sm bg-background/50 shrink-0">
+          {/* Logo + name */}
+          <div className="flex items-center gap-2.5 min-w-0">
             <ButterflyLogo />
-            <div className="min-w-0">
-              <h1 className="text-lg sm:text-xl font-semibold truncate">
+            <div className="min-w-0 hidden sm:block">
+              <h1 className="text-base font-semibold leading-none truncate">
                 Butterfly Drop
               </h1>
-              <p className="text-sm sm:text-base md:text-lg font-medium text-muted-foreground">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 Let your files fly
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 lg:gap-4 w-full sm:w-auto justify-end flex-wrap">
+          {/* ── Tab toggle — the single source of truth for mode ── */}
+          <div className="flex items-center p-1 rounded-xl bg-muted/60 border border-border/50 gap-0.5">
+            <button
+              onClick={() => setActiveTab("send")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200",
+                activeTab === "send"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Send className="h-3.5 w-3.5" />
+              Send Files
+            </button>
+
+            <button
+              onClick={() => setActiveTab("sync")}
+              className={cn(
+                "relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200",
+                activeTab === "sync"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <RefreshCw
+                className={cn(
+                  "h-3.5 w-3.5",
+                  bdpSyncingCount > 0 && "animate-spin",
+                )}
+              />
+              Sync Pairs
+              {/* Activity badge */}
+              {bdpConflictCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[9px] text-white font-bold">
+                  {bdpConflictCount}
+                </span>
+              )}
+              {bdpConflictCount === 0 && bdpSyncingCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500" />
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Right toolbar */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
             {shareableUrl && (
-              <div className="flex-1 sm:flex-initial min-w-0">
+              <div className="hidden sm:block">
                 <ShareLink url={shareableUrl} />
               </div>
             )}
@@ -621,197 +575,149 @@ function AppContent() {
               peerCount={readyPeers.length}
               sessionId={session.session?.id || null}
             />
-            {/* BDP Sync panel toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setBdpPanelOpen((v) => !v)}
-              className={cn(
-                "h-9 w-9 relative",
-                bdpPanelOpen && "bg-primary/10 text-primary",
-              )}
-              aria-label="Sync pairs"
-              title="Butterfly Delta Protocol — folder sync"
-            >
-              <RefreshCw className="h-5 w-5" />
-              {/* Badge for active syncs or conflicts */}
-              {(() => {
-                const conflicts = [...bdp.engineStates.values()].filter(
-                  (s) => s.phase === "resolving_conflict",
-                ).length;
-                const syncing = [...bdp.engineStates.values()].filter(
-                  (s) =>
-                    s.phase === "transferring" ||
-                    s.phase === "diffing" ||
-                    s.phase === "delta_sync" ||
-                    s.phase === "full_sync",
-                ).length;
-                if (conflicts > 0)
-                  return (
-                    <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[9px] text-white font-bold">
-                      {conflicts}
-                    </span>
-                  );
-                if (syncing > 0)
-                  return (
-                    <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500" />
-                    </span>
-                  );
-                return null;
-              })()}
-            </Button>
             <Button
               variant="ghost"
               size="icon"
               onClick={() =>
                 window.open("https://github.com/a-saed/ButterflyDrop", "_blank")
               }
-              className="h-9 w-9"
+              className="h-9 w-9 hidden sm:flex"
               aria-label="View on GitHub"
             >
-              <Github className="h-5 w-5" />
+              <Github className="h-4 w-4" />
             </Button>
             <ThemeToggle />
           </div>
         </header>
 
-        {/* Main Content Area */}
-        <main className="flex-1 relative">
-          {/* Peer Network - Full screen spatial layout */}
-          <div className="absolute inset-0">
-            <PeerNetwork
-              peers={peers}
-              selectedPeerId={selectedPeerId}
-              onPeerSelect={handlePeerSelect}
-              hasFiles={selectedFiles.length > 0}
-              readyPeers={readyPeers}
-              onSyncWithPeer={handleSyncWithPeer}
-            />
-          </div>
-
-          {/* ── Bottom Action Panel ─────────────────────────────────────── */}
-          <div className="absolute bottom-0 left-0 right-0 px-4 sm:px-6 pb-4 sm:pb-6">
-            <div className="max-w-2xl mx-auto space-y-3">
-              {/* ── ACTIVE TRANSFER: Send progress ── */}
-              {(isSending || sendComplete || sendError) && (
-                <SendProgressPanel
-                  isSending={isSending}
-                  sendProgress={sendProgress}
-                  sendComplete={sendComplete}
-                  sendError={sendError}
-                  peerName={
-                    sendingToPeer
-                      ? peers.find((p) => p.id === sendingToPeer)?.name ||
-                        "peer"
-                      : selectedPeerName
-                  }
-                  onReset={resetSendState}
+        {/* ── Tab content ── */}
+        <main className="flex-1 relative overflow-hidden">
+          {/* ══════════════════════════════════════════════════════════════
+              TAB 1 — SEND FILES
+              Full-screen peer network + bottom action panel.
+              No mention of sync pairs anywhere in this tab.
+          ══════════════════════════════════════════════════════════════ */}
+          {activeTab === "send" && (
+            <>
+              {/* Peer network — spatial, full area */}
+              <div className="absolute inset-0">
+                <PeerNetwork
+                  peers={peers}
+                  selectedPeerId={selectedPeerId}
+                  onPeerSelect={handlePeerSelect}
+                  hasFiles={selectedFiles.length > 0}
+                  readyPeers={readyPeers}
                 />
-              )}
+              </div>
 
-              {/* ── NORMAL STATE (not transferring) ── */}
-              {!isSending &&
-                !sendComplete &&
-                !sendError &&
-                (() => {
-                  // ── State A: Files selected → show file list + send action ──
-                  if (selectedFiles.length > 0) {
-                    return (
-                      <div className="bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl overflow-hidden">
-                        {/* Files list */}
-                        <div className="p-4">
-                          <FileList
-                            files={selectedFiles}
-                            onRemove={handleRemoveFile}
-                            onClear={handleClearFiles}
-                          />
-                        </div>
+              {/* Bottom action panel */}
+              <div className="absolute bottom-0 left-0 right-0 px-4 sm:px-6 pb-4 sm:pb-6">
+                <div className="max-w-2xl mx-auto space-y-3">
+                  {/* Share link on mobile (hidden in header) */}
+                  {shareableUrl && (
+                    <div className="sm:hidden">
+                      <ShareLink url={shareableUrl} />
+                    </div>
+                  )}
 
-                        {/* Send footer */}
-                        <div className="px-4 pb-4 border-t border-border/40 pt-3 flex items-center gap-3">
-                          {/* Peer selector pill */}
-                          {readyPeers.length > 1 && (
-                            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border/60 bg-muted/40 text-xs font-medium text-muted-foreground cursor-pointer hover:bg-muted/70 transition-colors">
-                              <span className="truncate max-w-[120px]">
-                                {selectedPeerName}
-                              </span>
-                              <ChevronDown className="h-3 w-3 shrink-0" />
-                            </div>
-                          )}
+                  {/* ── Active transfer ── */}
+                  {(isSending || sendComplete || sendError) && (
+                    <SendProgressPanel
+                      isSending={isSending}
+                      sendProgress={sendProgress}
+                      sendComplete={sendComplete}
+                      sendError={sendError}
+                      peerName={
+                        sendingToPeer
+                          ? peers.find((p) => p.id === sendingToPeer)?.name ||
+                            "peer"
+                          : selectedPeerName
+                      }
+                      onReset={resetSendState}
+                    />
+                  )}
 
-                          {/* Status / action */}
-                          <div className="flex-1 flex justify-end">
-                            {/* Ready to send */}
-                            {canSend && (
-                              <Button
-                                size="lg"
-                                onClick={handleSend}
-                                className="gap-2 h-11 px-6 text-sm font-semibold shadow-lg hover:shadow-xl transition-all"
-                              >
-                                <Send className="h-4 w-4" />
-                                Send to {selectedPeerName}
-                              </Button>
+                  {/* ── Idle / file-selection panel ── */}
+                  {!isSending && !sendComplete && !sendError && (
+                    <>
+                      {/* State A — files staged, ready to send */}
+                      {selectedFiles.length > 0 && (
+                        <div className="bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl overflow-hidden">
+                          <div className="p-4">
+                            <FileList
+                              files={selectedFiles}
+                              onRemove={handleRemoveFile}
+                              onClear={handleClearFiles}
+                            />
+                          </div>
+
+                          {/* Footer: peer selector + send button */}
+                          <div className="px-4 pb-4 pt-3 border-t border-border/40 flex items-center gap-3">
+                            {readyPeers.length > 1 && (
+                              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border/60 bg-muted/40 text-xs font-medium text-muted-foreground cursor-pointer hover:bg-muted/70 transition-colors">
+                                <span className="truncate max-w-30">
+                                  {selectedPeerName}
+                                </span>
+                                <ChevronDown className="h-3 w-3 shrink-0" />
+                              </div>
                             )}
 
-                            {/* No peers yet */}
-                            {selectedFiles.length > 0 &&
-                              !canSend &&
-                              peers.length === 0 && (
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <div className="flex-1 flex justify-end items-center gap-3">
+                              {canSend && (
+                                <Button
+                                  size="lg"
+                                  onClick={handleSend}
+                                  className="gap-2 h-11 px-6 text-sm font-semibold shadow-lg hover:shadow-xl transition-all"
+                                >
+                                  <Send className="h-4 w-4" />
+                                  Send to {selectedPeerName}
+                                </Button>
+                              )}
+
+                              {!canSend && peers.length === 0 && (
+                                <p className="flex items-center gap-2 text-sm text-muted-foreground">
                                   <Link2 className="h-4 w-4 shrink-0" />
-                                  <span>
-                                    Share your link to connect a device first
-                                  </span>
-                                </div>
+                                  Share your link to connect a device first
+                                </p>
                               )}
 
-                            {/* Peer connecting */}
-                            {selectedFiles.length > 0 &&
-                              !canSend &&
-                              peers.length > 0 &&
-                              selectedPeerId &&
-                              !isPeerReady(selectedPeerId) && (
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                                  <span>Connecting to {selectedPeerName}…</span>
-                                </div>
-                              )}
+                              {!canSend &&
+                                peers.length > 0 &&
+                                selectedPeerId &&
+                                !isPeerReady(selectedPeerId) && (
+                                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                                    Connecting to {selectedPeerName}…
+                                  </p>
+                                )}
 
-                            {/* Peer connected but none selected */}
-                            {selectedFiles.length > 0 &&
-                              !canSend &&
-                              peers.length > 0 &&
-                              !selectedPeerId && (
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                  <span>Tap a device above to select it</span>
-                                </div>
-                              )}
+                              {!canSend &&
+                                peers.length > 0 &&
+                                !selectedPeerId && (
+                                  <p className="text-sm text-muted-foreground">
+                                    Tap a device above to select it
+                                  </p>
+                                )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  }
+                      )}
 
-                  // ── State B: No files yet ──
-                  return (
-                    <div className="bg-background/90 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl overflow-hidden">
-                      {/* ── Step strip ── */}
-                      {(() => {
-                        const hasPeer = readyPeers.length > 0;
-                        return (
+                      {/* State B — no files yet */}
+                      {selectedFiles.length === 0 && (
+                        <div className="bg-background/90 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl overflow-hidden">
+                          {/* Step strip */}
                           <div className="flex items-center gap-0 border-b border-border/40 px-4 py-2.5 bg-muted/20">
                             {/* Step 1 */}
                             <div
                               className={cn(
                                 "flex items-center gap-1.5 text-xs font-medium transition-colors",
-                                hasPeer
+                                readyPeers.length > 0
                                   ? "text-emerald-600 dark:text-emerald-400"
                                   : "text-primary",
                               )}
                             >
-                              {hasPeer ? (
+                              {readyPeers.length > 0 ? (
                                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
                               ) : (
                                 <span className="h-4 w-4 rounded-full border-2 border-current flex items-center justify-center text-[10px] font-bold shrink-0">
@@ -829,8 +735,8 @@ function AppContent() {
                             {/* Step 2 */}
                             <div
                               className={cn(
-                                "flex items-center gap-1.5 text-xs font-medium transition-colors",
-                                hasPeer
+                                "flex items-center gap-1.5 text-xs font-medium",
+                                readyPeers.length > 0
                                   ? "text-primary"
                                   : "text-muted-foreground",
                               )}
@@ -838,7 +744,7 @@ function AppContent() {
                               <span
                                 className={cn(
                                   "h-4 w-4 rounded-full border-2 flex items-center justify-center text-[10px] font-bold shrink-0",
-                                  hasPeer
+                                  readyPeers.length > 0
                                     ? "border-primary"
                                     : "border-muted-foreground/40",
                                 )}
@@ -848,7 +754,7 @@ function AppContent() {
                               <span className="hidden sm:inline">
                                 Drop your files
                               </span>
-                              <span className="sm:hidden">Drop files</span>
+                              <span className="sm:hidden">Add files</span>
                             </div>
 
                             <div className="w-6 h-px bg-border/60 mx-2 shrink-0" />
@@ -861,327 +767,266 @@ function AppContent() {
                               <span>Send</span>
                             </div>
 
-                            {/* Connected peer badge */}
-                            {hasPeer && selectedPeerId && (
+                            {/* Active peer badge */}
+                            {readyPeers.length > 0 && selectedPeerId && (
                               <div className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium text-emerald-700 dark:text-emerald-400">
                                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                <span className="truncate max-w-[100px]">
+                                <span className="truncate max-w-25">
                                   {selectedPeerName}
                                 </span>
                               </div>
                             )}
-                            {hasPeer && !selectedPeerId && (
-                              <div className="ml-auto text-xs text-muted-foreground italic">
+                            {readyPeers.length > 0 && !selectedPeerId && (
+                              <span className="ml-auto text-xs text-muted-foreground italic">
                                 Tap a device ↑
-                              </div>
+                              </span>
                             )}
                           </div>
-                        );
-                      })()}
 
-                      {/* ── Drop zone body ── */}
-                      <div className="p-4">
-                        {readyPeers.length === 0 ? (
-                          /* No peer connected yet */
-                          <div className="flex flex-col sm:flex-row items-center gap-4 py-2">
-                            <div className="flex-1 text-center sm:text-left">
-                              <p className="text-sm font-medium mb-1">
-                                Waiting for a device to connect
-                              </p>
-                              <p className="text-xs text-muted-foreground leading-relaxed">
-                                Share your link or let someone scan your QR code
-                                — once they open it, you'll be connected
-                                instantly.
-                              </p>
-                            </div>
-                            <div className="flex gap-2 shrink-0">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="gap-1.5 text-xs"
-                                onClick={() =>
-                                  document.getElementById("file-input")?.click()
-                                }
-                              >
-                                <FileUp className="h-3.5 w-3.5" />
-                                Pick files
-                              </Button>
-                            </div>
-                          </div>
-                        ) : (
-                          /* Peer ready — show drop zone */
-                          <div
-                            className={cn(
-                              "group relative flex flex-col sm:flex-row items-center gap-4",
-                              "border-2 border-dashed rounded-xl p-4 transition-all duration-200",
-                              isDragActive
-                                ? "border-primary bg-primary/5 scale-[1.01]"
-                                : "border-border/50 hover:border-primary/40 hover:bg-muted/30",
-                            )}
-                          >
-                            {/* Icon */}
-                            <div
-                              className={cn(
-                                "flex items-center justify-center h-14 w-14 rounded-2xl shrink-0 transition-colors",
-                                isDragActive
-                                  ? "bg-primary/10 text-primary"
-                                  : "bg-muted/60 text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary",
-                              )}
-                            >
-                              {isDragActive ? (
-                                <Upload className="h-7 w-7 animate-bounce" />
-                              ) : (
-                                <Upload className="h-7 w-7" />
-                              )}
-                            </div>
-
-                            {/* Text */}
-                            <div className="flex-1 text-center sm:text-left">
-                              <p className="text-sm font-semibold mb-0.5">
-                                {isDragActive
-                                  ? "Release to add files"
-                                  : "Drop files or folders here"}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {isDragActive
-                                  ? `Will send to ${selectedPeerName}`
-                                  : "They'll be sent directly to the connected device — no upload needed"}
-                              </p>
-                            </div>
-
-                            {/* Buttons */}
-                            {!isDragActive && (
-                              <div className="flex gap-2 shrink-0">
+                          {/* Drop zone body */}
+                          <div className="p-4">
+                            {readyPeers.length === 0 ? (
+                              /* No peer yet */
+                              <div className="flex flex-col sm:flex-row items-center gap-4 py-1">
+                                <div className="flex-1 text-center sm:text-left">
+                                  <p className="text-sm font-medium mb-1">
+                                    Waiting for a device to connect
+                                  </p>
+                                  <p className="text-xs text-muted-foreground leading-relaxed">
+                                    Share your link or QR code — once the other
+                                    device opens it, you'll be connected
+                                    instantly.
+                                  </p>
+                                </div>
                                 <Button
-                                  variant="default"
+                                  variant="outline"
                                   size="sm"
-                                  className="gap-1.5 text-xs h-9"
+                                  className="gap-1.5 text-xs shrink-0"
                                   onClick={() =>
                                     document
-                                      .getElementById("file-input")
+                                      .getElementById("file-input-app")
                                       ?.click()
                                   }
                                 >
                                   <FileUp className="h-3.5 w-3.5" />
-                                  Browse files
+                                  Pick files anyway
                                 </Button>
-                                {selectedPeerId &&
-                                  isPeerReady(selectedPeerId) && (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="gap-1.5 text-xs h-9"
-                                      onClick={() =>
-                                        handleSyncWithPeer(selectedPeerId)
-                                      }
-                                    >
-                                      <FolderSync className="h-3.5 w-3.5" />
-                                      Sync folder
-                                    </Button>
+                              </div>
+                            ) : (
+                              /* Peer ready — dashed drop zone */
+                              <div
+                                className={cn(
+                                  "group flex flex-col sm:flex-row items-center gap-4",
+                                  "border-2 border-dashed rounded-xl p-4 transition-all duration-200 cursor-pointer",
+                                  isDragActive
+                                    ? "border-primary bg-primary/5 scale-[1.01]"
+                                    : "border-border/50 hover:border-primary/40 hover:bg-muted/30",
+                                )}
+                                onClick={() =>
+                                  document
+                                    .getElementById("file-input-app")
+                                    ?.click()
+                                }
+                              >
+                                <div
+                                  className={cn(
+                                    "flex items-center justify-center h-14 w-14 rounded-2xl shrink-0 transition-colors pointer-events-none",
+                                    isDragActive
+                                      ? "bg-primary/10 text-primary"
+                                      : "bg-muted/60 text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary",
                                   )}
+                                >
+                                  <Upload
+                                    className={cn(
+                                      "h-7 w-7",
+                                      isDragActive && "animate-bounce",
+                                    )}
+                                  />
+                                </div>
+
+                                <div className="flex-1 text-center sm:text-left pointer-events-none">
+                                  <p className="text-sm font-semibold mb-0.5">
+                                    {isDragActive
+                                      ? "Release to add files"
+                                      : "Drop files or folders here"}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {isDragActive
+                                      ? `Will send to ${selectedPeerName}`
+                                      : "Sent directly to the connected device — no upload, no cloud"}
+                                  </p>
+                                </div>
+
+                                {!isDragActive && (
+                                  <Button
+                                    variant="default"
+                                    size="sm"
+                                    className="gap-1.5 text-xs h-9 shrink-0 pointer-events-none"
+                                    tabIndex={-1}
+                                  >
+                                    <FileUp className="h-3.5 w-3.5" />
+                                    Browse files
+                                  </Button>
+                                )}
                               </div>
                             )}
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
+                        </div>
+                      )}
+                    </>
+                  )}
 
-              {/* Hidden file input */}
-              <input
-                id="file-input"
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  if (e.target.files) {
-                    const files = Array.from(e.target.files);
-                    setSelectedFiles((prev) => [...prev, ...files]);
-                    toast.success(
-                      `${files.length} file${files.length > 1 ? "s" : ""} added`,
-                      { icon: "📁" },
-                    );
-                  }
-                }}
+                  {/* Hidden file input */}
+                  <input
+                    id="file-input-app"
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files) {
+                        const files = Array.from(e.target.files);
+                        setSelectedFiles((prev) => [...prev, ...files]);
+                        toast.success(
+                          `${files.length} file${files.length > 1 ? "s" : ""} added`,
+                          { icon: "📁" },
+                        );
+                        // Reset input so the same file can be re-added
+                        e.target.value = "";
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Received files panel — floats bottom-right, send tab only */}
+              <ReceivedFilesPanel
+                incomingTransfer={incomingTransfer}
+                receiveProgress={receiveProgress}
+                isReceiving={isReceiving}
+                receivedFiles={receivedFiles}
+                receiveComplete={receiveComplete}
+                onDownloadFile={downloadFile}
+                onDownloadAll={downloadAllFiles}
+                onClear={clearReceivedFiles}
+                formatBytes={formatBytes}
               />
+            </>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════
+              TAB 2 — SYNC PAIRS (BDP)
+              Full-screen sync dashboard. No peer avatars, no drop zones.
+              This is the dedicated space for persistent folder sync setup.
+          ══════════════════════════════════════════════════════════════ */}
+          {activeTab === "sync" && (
+            <div className="absolute inset-0 overflow-y-auto">
+              <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 space-y-4">
+                {/* Init error */}
+                {bdp.initError && (
+                  <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-900/10 px-3 py-2.5">
+                    <AlertTriangle className="size-4 text-red-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      {bdp.initError.message}
+                    </p>
+                  </div>
+                )}
+
+                {/* Active sync progress banners */}
+                {[...bdp.engineStates.entries()]
+                  .filter(([, s]) =>
+                    [
+                      "greeting",
+                      "diffing",
+                      "delta_sync",
+                      "full_sync",
+                      "transferring",
+                      "finalizing",
+                    ].includes(s.phase),
+                  )
+                  .map(([pairId, state]) => (
+                    <SyncProgress key={pairId} state={state} />
+                  ))}
+
+                {/* Conflict resolver */}
+                {activeConflictPairId &&
+                  bdpConflictState?.phase === "resolving_conflict" &&
+                  bdpConflictState.pendingConflicts.length > 0 && (
+                    <ConflictResolver
+                      pairId={activeConflictPairId}
+                      conflicts={bdpConflictState.pendingConflicts}
+                      localDeviceName={bdp.device?.deviceName ?? "This device"}
+                      remoteDeviceName={
+                        bdpConflictState.peerDeviceName ?? "Remote device"
+                      }
+                      onResolve={bdp.resolveConflict}
+                      onAllResolved={() =>
+                        setDismissedConflictPairs((prev) => {
+                          const next = new Set(prev);
+                          next.add(activeConflictPairId);
+                          return next;
+                        })
+                      }
+                      onDismiss={() =>
+                        setDismissedConflictPairs((prev) => {
+                          const next = new Set(prev);
+                          next.add(activeConflictPairId);
+                          return next;
+                        })
+                      }
+                    />
+                  )}
+
+                {/* Vault browser or dashboard */}
+                {vaultPairId && bdpVaultPair ? (
+                  <VaultBrowser
+                    pairId={vaultPairId}
+                    files={bdp.vaultFiles.get(vaultPairId) ?? []}
+                    folderName={bdpVaultPair.localFolder.name}
+                    onRefresh={() => bdp.refreshVaultFiles(vaultPairId)}
+                    onClose={() => setVaultPairId(null)}
+                  />
+                ) : (
+                  <SyncDashboard
+                    pairs={bdp.pairs}
+                    engineStates={bdp.engineStates}
+                    onAddPair={() => setAddPairOpen(true)}
+                    onViewVault={(pairId) => setVaultPairId(pairId)}
+                    onDeletePair={async (pairId) => {
+                      await bdp.deletePair(pairId);
+                      toast.success("Sync pair removed");
+                    }}
+                    onSyncNow={(pairId) => {
+                      bdp.triggerSync(pairId).catch((err) => {
+                        toast.error("Sync failed", {
+                          description:
+                            err instanceof Error ? err.message : String(err),
+                        });
+                      });
+                    }}
+                  />
+                )}
+
+                {/* Quick "Add pair" shortcut at the bottom when pairs exist */}
+                {bdp.pairs.length > 0 && !vaultPairId && (
+                  <div className="flex justify-center pb-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAddPairOpen(true)}
+                      className="gap-2"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add another pair
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </main>
       </div>
 
-      {/* Received Files Panel - Floating on right side */}
-      <ReceivedFilesPanel
-        incomingTransfer={incomingTransfer}
-        receiveProgress={receiveProgress}
-        isReceiving={isReceiving}
-        receivedFiles={receivedFiles}
-        receiveComplete={receiveComplete}
-        onDownloadFile={downloadFile}
-        onDownloadAll={downloadAllFiles}
-        onClear={clearReceivedFiles}
-        formatBytes={formatBytes}
-      />
-
-      {/* Folder Sync Sheet — triggered from peer avatar "Sync folder" button */}
-      {syncPeerId && (
-        <SyncSheet
-          open={!!syncPeerId}
-          onClose={() => {
-            setSyncPeerId(null);
-            resetSendState();
-          }}
-          peerId={syncPeerId}
-          peerName={peers.find((p) => p.id === syncPeerId)?.name ?? "Peer"}
-          sendFiles={sendFiles}
-          getDataChannelForPeer={getDataChannelForPeer}
-          isPeerReady={isPeerReady}
-          isSending={isSending}
-          sendProgress={sendProgress}
-          sendComplete={sendComplete}
-          sendError={sendError}
-          resetSendState={resetSendState}
-          formatBytes={formatBytes}
-        />
-      )}
-
-      {/* ── BDP Sync Panel ─────────────────────────────────────────────────── */}
-      {/* Slide-in panel from the right, sits above everything else */}
-      <div
-        className={cn(
-          "fixed inset-y-0 right-0 w-full sm:w-105 z-40 flex flex-col",
-          "bg-background/95 backdrop-blur-md border-l border-border/60 shadow-2xl",
-          "transition-transform duration-300 ease-in-out",
-          bdpPanelOpen ? "translate-x-0" : "translate-x-full",
-        )}
-        aria-hidden={!bdpPanelOpen}
-      >
-        {/* Panel header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 shrink-0">
-          <div className="flex items-center gap-2">
-            <RefreshCw className="size-4 text-primary" />
-            <span className="text-sm font-semibold">Sync Pairs</span>
-            {bdp.initialising && (
-              <span className="text-xs text-muted-foreground">(loading…)</span>
-            )}
-          </div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => {
-              setBdpPanelOpen(false);
-              setVaultPairId(null);
-            }}
-          >
-            <X className="size-4" />
-          </Button>
-        </div>
-
-        {/* Init error */}
-        {bdp.initError && (
-          <div className="mx-4 mt-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-900/10 px-3 py-2.5">
-            <AlertTriangle className="size-4 text-red-500 shrink-0 mt-0.5" />
-            <p className="text-xs text-red-600 dark:text-red-400">
-              {bdp.initError.message}
-            </p>
-          </div>
-        )}
-
-        {/* Panel body — scrollable */}
-        <div className="flex-1 overflow-y-auto p-4 min-h-0">
-          {/* ── Active sync progress for any transferring pair ── */}
-          {[...bdp.engineStates.entries()]
-            .filter(([, s]) =>
-              [
-                "greeting",
-                "diffing",
-                "delta_sync",
-                "full_sync",
-                "transferring",
-                "finalizing",
-              ].includes(s.phase),
-            )
-            .map(([pairId, state]) => (
-              <div key={pairId} className="mb-4">
-                <SyncProgress state={state} />
-              </div>
-            ))}
-
-          {/* ── Conflict resolver ── */}
-          {activeConflictPairId &&
-            bdpConflictState?.phase === "resolving_conflict" &&
-            bdpConflictState.pendingConflicts.length > 0 && (
-              <div className="mb-4">
-                <ConflictResolver
-                  pairId={activeConflictPairId}
-                  conflicts={bdpConflictState.pendingConflicts}
-                  localDeviceName={bdp.device?.deviceName ?? "This device"}
-                  remoteDeviceName={
-                    bdpConflictState.peerDeviceName ?? "Remote device"
-                  }
-                  onResolve={bdp.resolveConflict}
-                  onAllResolved={() =>
-                    setDismissedConflictPairs((prev) => {
-                      const next = new Set(prev);
-                      next.add(activeConflictPairId);
-                      return next;
-                    })
-                  }
-                  onDismiss={() =>
-                    setDismissedConflictPairs((prev) => {
-                      const next = new Set(prev);
-                      next.add(activeConflictPairId);
-                      return next;
-                    })
-                  }
-                />
-              </div>
-            )}
-
-          {/* ── Vault browser ── */}
-          {vaultPairId && bdpVaultPair ? (
-            <VaultBrowser
-              pairId={vaultPairId}
-              files={bdp.vaultFiles.get(vaultPairId) ?? []}
-              folderName={bdpVaultPair.localFolder.name}
-              onRefresh={() => bdp.refreshVaultFiles(vaultPairId)}
-              onClose={() => setVaultPairId(null)}
-            />
-          ) : (
-            /* ── Sync dashboard ── */
-            <SyncDashboard
-              pairs={bdp.pairs}
-              engineStates={bdp.engineStates}
-              onAddPair={() => setAddPairOpen(true)}
-              onViewVault={(pairId) => {
-                setVaultPairId(pairId);
-              }}
-              onDeletePair={async (pairId) => {
-                await bdp.deletePair(pairId);
-                toast.success("Sync pair removed");
-              }}
-              onSyncNow={(pairId) => {
-                bdp.triggerSync(pairId).catch((err) => {
-                  toast.error("Sync failed", {
-                    description:
-                      err instanceof Error ? err.message : String(err),
-                  });
-                });
-              }}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* BDP panel backdrop (mobile) */}
-      {bdpPanelOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/20 sm:hidden"
-          onClick={() => setBdpPanelOpen(false)}
-        />
-      )}
-
-      {/* Add Pair Dialog */}
+      {/* ── Add Pair Dialog ─────────────────────────────────────────────────── */}
       <AddPairDialog
         open={addPairOpen}
         onOpenChange={(next) => {
@@ -1207,14 +1052,15 @@ function AppContent() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// App — provider tree
+// ─────────────────────────────────────────────────────────────────────────────
+
 function App() {
   return (
     <ThemeProvider>
       <SessionProvider>
         <ConnectionProvider>
-          {/* WebRTCProvider ensures useWebRTC() is instantiated exactly once.
-              All hooks/components that need WebRTC state must use
-              useWebRTCContext() instead of calling useWebRTC() directly. */}
           <WebRTCProvider>
             <AppContent />
           </WebRTCProvider>
