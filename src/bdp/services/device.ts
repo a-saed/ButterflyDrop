@@ -8,103 +8,32 @@
  *  - Deriving a group key from pairId (used for relay encryption)
  *  - Detecting browser capabilities
  *
- * Uses IndexedDB directly
- * The private key is non-extractable and stored as a native CryptoKey in IDB.
+ * All persistence goes through idb.ts so the full 10-store schema is always
+ * created in a single onupgradeneeded call — no schema-race where device.ts
+ * used to open the same DB first with only 2 stores, leaving 8 stores missing.
+ *
+ * Cold-start lookup strategy:
+ *   The 'devices' store uses keyPath:'deviceId', so records are keyed by their
+ *   own deviceId. Since there is always exactly one self-device record, we use
+ *   idbGetAll('devices') on a cold start to retrieve it without needing to know
+ *   the deviceId first. After the first call the record is held in memory.
  */
 
 import { nanoid } from "nanoid";
 
 import type { BDPCapabilities, BDPDevice, DeviceId, PairId } from "@/types/bdp";
 import { BDP_CONSTANTS } from "@/types/bdp";
+import { openDB, idbGetAll, idbPut, idbGet, idbPutWithKey } from "./idb";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Internal helpers
+// In-memory caches
 // ─────────────────────────────────────────────────────────────────────────────
-
-const DEVICE_DB_NAME = BDP_CONSTANTS.IDB_DB_NAME;
-const DEVICE_DB_VERSION = BDP_CONSTANTS.IDB_DB_VERSION;
-const DEVICE_STORE = "devices";
-const DEVICE_KEY = "self";
-
-/**
- * Private key store name — separate from the device record so the non-extractable
- * CryptoKey is never accidentally serialised to JSON.
- */
-const KEY_STORE = "deviceKeys";
 
 /** Cached device record — populated after the first call to getOrCreateDevice(). */
 let cachedDevice: BDPDevice | null = null;
 
 /** Cached private key — kept in memory to avoid redundant IDB reads. */
 let cachedPrivateKey: CryptoKey | null = null;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Raw IDB helpers (device.ts cannot use idb.ts yet)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Opens the BDP IndexedDB database.
- * Creates the minimal stores needed by device.ts if they don't exist.
- * The full schema migration lives in idb.ts — this just ensures the two
- * stores device.ts needs are present.
- */
-function openDeviceDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DEVICE_DB_NAME, DEVICE_DB_VERSION);
-
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-
-      // devices store — keyed by 'self'
-      if (!db.objectStoreNames.contains(DEVICE_STORE)) {
-        db.createObjectStore(DEVICE_STORE);
-      }
-
-      // deviceKeys store — parallel store for non-extractable CryptoKey objects
-      if (!db.objectStoreNames.contains(KEY_STORE)) {
-        db.createObjectStore(KEY_STORE);
-      }
-    };
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    request.onblocked = () =>
-      reject(new Error("BDP device DB open blocked — close other tabs"));
-  });
-}
-
-/**
- * Reads a value from the given store by key.
- */
-function idbRead<T>(
-  db: IDBDatabase,
-  storeName: string,
-  key: IDBValidKey,
-): Promise<T | undefined> {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readonly");
-    const req = tx.objectStore(storeName).get(key);
-    req.onsuccess = () => resolve(req.result as T | undefined);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-/**
- * Writes a value to the given store under the given key.
- */
-function idbWrite(
-  db: IDBDatabase,
-  storeName: string,
-  key: IDBValidKey,
-  value: unknown,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    const req = tx.objectStore(storeName).put(value, key);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Capability detection
@@ -170,16 +99,19 @@ export function detectCapabilities(): BDPCapabilities {
 /**
  * Returns the persisted device record, creating it on first call.
  *
+ * Uses idb.ts's openDB() so the full 10-store schema is always initialised
+ * before any reads or writes — no partial-schema races possible.
+ *
  * On first launch:
  *  1. Generates a nanoid(21) DeviceId
  *  2. Generates a non-extractable X25519 keypair
  *  3. Exports the public key as base64
- *  4. Persists the BDPDevice record and the private CryptoKey in IDB
+ *  4. Persists the BDPDevice record in 'devices' and the private CryptoKey
+ *     in 'deviceKeys' (keyed by deviceId) via idb.ts helpers
  *
  * On subsequent calls:
- *  - Loads the persisted record from IDB
- *  - Refreshes capabilities (browser support may have changed)
- *  - Returns the full BDPDevice
+ *  - Returns from in-memory cache (capabilities refreshed each time)
+ *  - Falls back to IDB on cold start via idbGetAll('devices')[0]
  *
  * @returns The device record for this browser
  * @throws If IndexedDB or WebCrypto are unavailable
@@ -191,9 +123,14 @@ export async function getOrCreateDevice(): Promise<BDPDevice> {
     return cachedDevice;
   }
 
-  const db = await openDeviceDB();
+  // Ensure the full schema exists before touching any store
+  await openDB();
 
-  const existing = await idbRead<BDPDevice>(db, DEVICE_STORE, DEVICE_KEY);
+  // Cold-start: the 'devices' store is keyed by deviceId, so we use getAll()
+  // to retrieve the self-record without needing to know the deviceId first.
+  // There is always at most one self-device record in this store.
+  const allDevices = await idbGetAll<BDPDevice>("devices");
+  const existing = allDevices[0] as BDPDevice | undefined;
 
   if (existing) {
     const device: BDPDevice = {
@@ -203,7 +140,7 @@ export async function getOrCreateDevice(): Promise<BDPDevice> {
 
     // Warm up the private key cache
     cachedPrivateKey =
-      (await idbRead<CryptoKey>(db, KEY_STORE, DEVICE_KEY)) ?? null;
+      (await idbGet<CryptoKey>("deviceKeys", existing.deviceId)) ?? null;
 
     cachedDevice = device;
     return device;
@@ -211,8 +148,8 @@ export async function getOrCreateDevice(): Promise<BDPDevice> {
 
   // ── First launch ────────────────────────────────────────────────────────────
 
-  // Generate X25519 keypair
-  // Private key is non-extractable — it never leaves the browser's crypto store
+  // Generate X25519 keypair.
+  // Private key is non-extractable — it never leaves the browser's crypto store.
   const keyPair = (await crypto.subtle.generateKey(
     { name: "X25519" },
     false, // private key is non-extractable
@@ -235,11 +172,13 @@ export async function getOrCreateDevice(): Promise<BDPDevice> {
     createdAt: Date.now(),
   };
 
-  // Persist — write both records in their own transactions
-  // (IDB object stores must be in the same transaction to commit atomically,
-  // but since these are different stores opened together it's fine)
-  await idbWrite(db, DEVICE_STORE, DEVICE_KEY, device);
-  await idbWrite(db, KEY_STORE, DEVICE_KEY, keyPair.privateKey);
+  // Persist the device record.
+  // 'devices' uses keyPath:'deviceId' — idbPut uses device.deviceId as the key.
+  await idbPut<BDPDevice>("devices", device);
+
+  // Persist the private key.
+  // 'deviceKeys' uses keyPath:null — idbPutWithKey stores under explicit key.
+  await idbPutWithKey("deviceKeys", deviceId, keyPair.privateKey);
 
   cachedPrivateKey = keyPair.privateKey;
   cachedDevice = device;
@@ -249,7 +188,6 @@ export async function getOrCreateDevice(): Promise<BDPDevice> {
 
 /**
  * Returns the base64-encoded public key for this device.
- * The device record must have been created first via getOrCreateDevice().
  *
  * @returns Base64 public key string
  * @throws If device hasn't been initialised yet
@@ -264,7 +202,7 @@ export async function getPublicKeyB64(): Promise<string> {
  *
  * Uses our non-extractable X25519 private key and the peer's exported public
  * key (base64) to derive a symmetric key that only these two devices can
- * reproduce. This key is used for P2P WebRTC DataChannel message encryption.
+ * reproduce. Used for P2P WebRTC DataChannel message encryption.
  *
  * @param theirPublicKeyB64 - The peer's base64-encoded X25519 public key
  * @returns Non-extractable AES-256-GCM CryptoKey for encrypt/decrypt
@@ -285,7 +223,7 @@ export async function deriveECDHSharedKey(
     rawBytes,
     { name: "X25519" },
     false, // not extractable
-    [], // no key usages on the public key
+    [], // no key usages on the public key itself
   );
 
   // Derive a symmetric AES-256-GCM key from the ECDH exchange
@@ -301,17 +239,15 @@ export async function deriveECDHSharedKey(
 /**
  * Derives a deterministic AES-256-GCM group key from a pairId.
  *
- * Used for relay encryption when we don't yet have a peer's ECDH public key
- * (e.g. first relay push before the peer has joined). The pairId itself is
- * the shared secret — treat it like a password and never expose it.
+ * Used for relay encryption when we don't yet have a peer's ECDH public key.
+ * The pairId is the shared secret — never expose it.
  *
- * Key derivation uses HKDF-SHA-256 with a zero salt and a fixed info string.
+ * Key derivation: HKDF-SHA-256, zero salt, fixed info string.
  *
  * @param pairId - The shared pair secret
  * @returns Non-extractable AES-256-GCM CryptoKey for encrypt/decrypt
  */
 export async function deriveGroupKey(pairId: PairId): Promise<CryptoKey> {
-  // Import the pairId bytes as HKDF key material
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(pairId),
@@ -324,7 +260,7 @@ export async function deriveGroupKey(pairId: PairId): Promise<CryptoKey> {
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new Uint8Array(32), // zero salt — the pairId provides the entropy
+      salt: new Uint8Array(32), // zero salt — pairId provides the entropy
       info: new TextEncoder().encode(BDP_CONSTANTS.HKDF_INFO),
     },
     keyMaterial,
@@ -344,12 +280,11 @@ export async function deriveGroupKey(pairId: PairId): Promise<CryptoKey> {
  */
 export async function incrementLocalSeq(): Promise<number> {
   const device = await getOrCreateDevice();
-  const db = await openDeviceDB();
 
   const newSeq = device.localSeq + 1;
   const updated: BDPDevice = { ...device, localSeq: newSeq };
 
-  await idbWrite(db, DEVICE_STORE, DEVICE_KEY, updated);
+  await idbPut<BDPDevice>("devices", updated);
   cachedDevice = updated;
 
   return newSeq;
@@ -362,10 +297,9 @@ export async function incrementLocalSeq(): Promise<number> {
  */
 export async function setDeviceName(name: string): Promise<void> {
   const device = await getOrCreateDevice();
-  const db = await openDeviceDB();
 
   const updated: BDPDevice = { ...device, deviceName: name };
-  await idbWrite(db, DEVICE_STORE, DEVICE_KEY, updated);
+  await idbPut<BDPDevice>("devices", updated);
   cachedDevice = updated;
 }
 
@@ -375,18 +309,25 @@ export async function setDeviceName(name: string): Promise<void> {
 
 /**
  * Loads the private key from the in-memory cache or falls back to IDB.
+ * Requires getOrCreateDevice() to have been called first so cachedDevice
+ * is populated (needed to know which deviceId to look up).
  *
- * @throws If no private key exists (device hasn't been created yet)
+ * @throws If the device hasn't been loaded or the key is missing from IDB
  */
 async function loadPrivateKey(): Promise<CryptoKey> {
   if (cachedPrivateKey !== null) return cachedPrivateKey;
 
-  const db = await openDeviceDB();
-  const key = await idbRead<CryptoKey>(db, KEY_STORE, DEVICE_KEY);
+  if (!cachedDevice) {
+    throw new Error(
+      "BDP: loadPrivateKey called before getOrCreateDevice() — initialise the device first",
+    );
+  }
+
+  const key = await idbGet<CryptoKey>("deviceKeys", cachedDevice.deviceId);
 
   if (!key) {
     throw new Error(
-      "BDP: private key not found — call getOrCreateDevice() first",
+      "BDP: private key not found in IDB — storage may have been cleared",
     );
   }
 
@@ -396,7 +337,7 @@ async function loadPrivateKey(): Promise<CryptoKey> {
 
 /**
  * Builds a default human-readable device name from the browser user agent.
- * Best-effort: falls back to a random suffix if detection fails.
+ * Best-effort: falls back to a generic label if detection fails.
  *
  * Examples: "chrome-linux", "safari-macos", "firefox-windows"
  */
