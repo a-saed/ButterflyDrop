@@ -814,8 +814,8 @@ export function AddPairDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <FullscreenDialogContent>
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-border/60 shrink-0">
+        {/* Header — safe area top on PWA mobile so title isn't under status bar */}
+        <div className="flex items-center justify-between px-5 pt-[max(1.25rem,env(safe-area-inset-top,0px))] pb-3 border-b border-border/60 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             {mode !== "pick" && (
               <button
