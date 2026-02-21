@@ -477,7 +477,9 @@ function AppContent() {
 
       <div className="relative h-full flex flex-col" style={{ zIndex: 10 }}>
         {/* ── Header ──────────────────────────────────────────────────────── */}
-        <header className="shrink-0 bg-background/85 backdrop-blur-xl border-b border-border/30">
+        <header
+          className="shrink-0 bg-background/85 backdrop-blur-xl border-b border-border/30 pt-[env(safe-area-inset-top,0px)]"
+        >
           <div className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2.5">
             {/* Logo — icon only on mobile, full branding on sm+ */}
             <div className="flex items-center gap-2 shrink-0">
