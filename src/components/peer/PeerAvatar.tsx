@@ -42,17 +42,6 @@ const deviceColors: Record<Peer["deviceType"], string> = {
   laptop: "from-orange-500 to-amber-500",
 };
 
-const deviceRingColors: Record<Peer["deviceType"], string> = {
-  desktop: "ring-cyan-400/60",
-  mobile: "ring-pink-400/60",
-  tablet: "ring-emerald-400/60",
-  laptop: "ring-amber-400/60",
-};
-
-/**
- * Deterministic hash used to pick a robohash avatar so the same peer always
- * gets the same robot/monster face across refreshes.
- */
 function hashString(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -98,6 +87,15 @@ export function PeerAvatar({
   const showSendHint = hasFiles && isReady && isSelected;
   const showFileReadyRing = hasFiles && isReady;
 
+  // Derive ring appearance from state — one ring only, inside the button
+  const ringColor = isSelected
+    ? "border-primary/55"
+    : showFileReadyRing
+      ? "border-primary/40"
+      : "border-emerald-400/30";
+
+  const ringDuration = isSelected ? "2s" : showFileReadyRing ? "1.8s" : "3s";
+
   return (
     <div
       className={cn(
@@ -110,42 +108,25 @@ export function PeerAvatar({
         transform: "translateX(-50%)",
       }}
     >
-      {/* Outer glow rings when selected or has files */}
-      {isSelected && peer.isOnline && (
-        <>
-          <div
-            className="absolute inset-0 rounded-full bg-primary/15 blur-2xl scale-150 animate-pulse"
-            aria-hidden
-          />
-          <div
-            className={cn(
-              "absolute rounded-full border-2 animate-ping opacity-40",
-              "inset-[-8px]",
-              deviceRingColors[peer.deviceType],
-              "border-current",
-            )}
-            style={{ animationDuration: "2s" }}
-            aria-hidden
-          />
-        </>
-      )}
-
-      {/* File-ready pulsing halo */}
-      {showFileReadyRing && !isSelected && (
-        <div
-          className="absolute inset-[-4px] rounded-full border-2 border-primary/50 animate-ping opacity-60"
-          style={{ animationDuration: "1.5s" }}
-          aria-hidden
-        />
-      )}
-
-      {/* Avatar button */}
+      {/* Avatar button — all rings live INSIDE here so they wrap the circle only */}
       <button
         onClick={onClick}
         disabled={!peer.isOnline}
         className="relative block focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-full"
         aria-label={`${peer.name} — ${isReady ? "connected" : "connecting"}`}
       >
+        {/* Single subtle ping ring — sized to the avatar, never touches the label */}
+        {isReady && (
+          <span
+            className={cn(
+              "absolute inset-[-5px] rounded-full border pointer-events-none animate-ping",
+              ringColor,
+            )}
+            style={{ animationDuration: ringDuration }}
+            aria-hidden
+          />
+        )}
+
         <Avatar
           className={cn(
             "h-20 w-20 border-4 transition-all duration-300 shadow-lg overflow-hidden",
@@ -153,9 +134,9 @@ export function PeerAvatar({
               ? "hover:scale-110 hover:shadow-2xl"
               : "border-border/20",
             isSelected
-              ? "border-primary scale-110 shadow-primary/30 shadow-2xl"
+              ? "border-primary scale-110 shadow-primary/25 shadow-xl"
               : showFileReadyRing
-                ? "border-primary/60"
+                ? "border-primary/50"
                 : "border-background/80",
           )}
         >
@@ -196,7 +177,7 @@ export function PeerAvatar({
           <Icon className="h-3.5 w-3.5 text-muted-foreground" />
         </div>
 
-        {/* Connection status — bottom-right */}
+        {/* Connection status dot — bottom-right */}
         {peer.isOnline && (
           <div
             className={cn(
@@ -214,11 +195,11 @@ export function PeerAvatar({
           </div>
         )}
 
-        {/* Files-ready indicator — top-right, pulsing dot */}
+        {/* Files-ready dot — top-right */}
         {showFileReadyRing && (
           <div className="absolute -top-1 -right-1" aria-hidden>
             <span className="relative flex h-4 w-4">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
               <span className="relative inline-flex rounded-full h-4 w-4 bg-primary items-center justify-center">
                 <Send className="h-2.5 w-2.5 text-primary-foreground" />
               </span>
@@ -227,13 +208,8 @@ export function PeerAvatar({
         )}
       </button>
 
-      {/* Always-visible name label */}
-      <div
-        className={cn(
-          "flex flex-col items-center gap-0.5 pointer-events-none",
-          "transition-all duration-200",
-        )}
-      >
+      {/* Name + status label — below the button, never overlapped by rings */}
+      <div className="flex flex-col items-center gap-0.5 pointer-events-none">
         <span
           className={cn(
             "px-3 py-1 rounded-full text-xs font-semibold shadow-sm border whitespace-nowrap",
@@ -246,7 +222,6 @@ export function PeerAvatar({
           {peer.name}
         </span>
 
-        {/* Status sub-label */}
         <span
           className={cn(
             "text-[10px] font-medium transition-colors duration-200",
@@ -259,7 +234,7 @@ export function PeerAvatar({
         >
           {isReady
             ? showSendHint
-              ? "Ready — click Send below"
+              ? "Ready — tap Send below"
               : "Connected"
             : "Connecting…"}
         </span>
