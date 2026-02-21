@@ -251,6 +251,8 @@ function AppContent() {
   }, [connectionState, playError]);
 
   // ── Peer connect / disconnect toasts ─────────────────────────────────────
+  // Only toast once per peer id; do NOT remove from ref when peer disconnects,
+  // so connection flicker (e.g. on mobile PWA) doesn't cause repeated toasts.
   useEffect(() => {
     readyPeers.forEach((id) => {
       if (!toastedPeersRef.current.has(id)) {
@@ -262,12 +264,6 @@ function AppContent() {
           duration: 3000,
         });
       }
-    });
-
-    // Clean stale toast refs
-    const currentSet = new Set(readyPeers);
-    toastedPeersRef.current.forEach((id) => {
-      if (!currentSet.has(id)) toastedPeersRef.current.delete(id);
     });
   }, [readyPeers, peers, playConnect]);
 

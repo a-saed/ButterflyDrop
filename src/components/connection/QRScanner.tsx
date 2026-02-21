@@ -30,6 +30,7 @@ export function QRScanner({
   const [error, setError] = useState<string | null>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const scannerId = "qr-scanner";
+  const handledScanRef = useRef(false);
 
   const stopScanner = async () => {
     if (scannerRef.current && isScanning) {
@@ -49,6 +50,7 @@ export function QRScanner({
       return; // Already started
     }
 
+    handledScanRef.current = false;
     try {
       setError(null);
       setIsScanning(true);
@@ -106,46 +108,38 @@ export function QRScanner({
           },
         },
         (decodedText) => {
-          // Successfully scanned
-          console.log("✅ QR Code scanned:", decodedText);
+          // Guard: library can fire callback repeatedly before stop() completes
+          if (handledScanRef.current) return;
 
           // Extract session ID from URL
           let sessionId: string | null = null;
 
           try {
-            // Try to parse as URL first
             const url = new URL(decodedText);
             const hash = url.hash.slice(1);
             const params = new URLSearchParams(hash);
             sessionId = params.get("session");
           } catch {
-            // If not a URL, check if it's just a session ID
             if (isValidSessionId(decodedText)) {
               sessionId = decodedText;
             } else {
-              // Try to extract session ID from any string format
               const match = decodedText.match(
                 /session[=:]([A-Za-z0-9_-]{8,16})/i,
               );
-              if (match) {
-                sessionId = match[1];
-              }
+              if (match) sessionId = match[1];
             }
           }
 
           if (sessionId && isValidSessionId(sessionId)) {
+            handledScanRef.current = true;
             toast.success("QR code scanned!", {
               description: `Joining session...`,
               icon: "🦋",
             });
-
-            // Stop scanner
             stopScanner();
             setIsOpen(false);
-
-            // Call success handler
             onScanSuccess(sessionId);
-          } else {
+          } else if (!handledScanRef.current) {
             toast.error("Invalid QR code", {
               description:
                 "This doesn't appear to be a Butterfly Drop session QR code",
@@ -225,6 +219,7 @@ export function QRScanner({
   const startScannerWithFallback = async () => {
     if (scannerRef.current) return;
 
+    handledScanRef.current = false;
     try {
       setError(null);
       setIsScanning(true);
@@ -239,6 +234,7 @@ export function QRScanner({
           qrbox: { width: 300, height: 300 },
         },
         (decodedText) => {
+          if (handledScanRef.current) return;
           let sessionId: string | null = null;
           try {
             const url = new URL(decodedText);
@@ -257,6 +253,7 @@ export function QRScanner({
           }
 
           if (sessionId && isValidSessionId(sessionId)) {
+            handledScanRef.current = true;
             toast.success("QR code scanned!", {
               description: `Joining session...`,
               icon: "🦋",
