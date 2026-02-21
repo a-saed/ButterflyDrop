@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Copy, Check, Share2, QrCode } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
 import {
@@ -14,9 +15,11 @@ import {
 
 interface ShareLinkProps {
   url: string;
+  /** On mobile, hides the QR dialog button to save header space */
+  compact?: boolean;
 }
 
-export function ShareLink({ url }: ShareLinkProps) {
+export function ShareLink({ url, compact = false }: ShareLinkProps) {
   const [copied, setCopied] = useState(false);
   const [qrSize, setQrSize] = useState(256);
 
@@ -143,7 +146,10 @@ export function ShareLink({ url }: ShareLinkProps) {
           <Button
             variant="outline"
             size="icon"
-            className="shrink-0 h-8 w-8 touch-manipulation transition-all"
+            className={cn(
+              "shrink-0 h-8 w-8 touch-manipulation transition-all",
+              compact && "hidden sm:flex",
+            )}
             title="Show QR code - scan with another device to join"
           >
             <QrCode className="h-4 w-4" />

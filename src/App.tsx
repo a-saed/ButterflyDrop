@@ -33,6 +33,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useDropzone } from "react-dropzone";
 import { useSoundEffects } from "@/hooks/useSoundEffects";
+import { BDPProtocolInfo } from "@/bdp/components/BDPProtocolInfo";
 
 // BDP
 import { useBDP } from "@/bdp/hooks/useBDP";
@@ -481,9 +482,14 @@ function AppContent() {
             {/* Logo */}
             <div className="flex items-center gap-2 shrink-0">
               <ButterflyLogo size={28} />
-              <span className="hidden sm:block text-sm font-bold tracking-tight leading-none bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">
-                Butterfly Drop
-              </span>
+              <div className="flex flex-col leading-none">
+                <span className="text-xs sm:text-sm font-bold tracking-tight text-foreground">
+                  Butterfly Drop
+                </span>
+                <span className="text-[9px] sm:text-[10px] text-muted-foreground font-medium tracking-wide mt-0.5">
+                  Let your files fly
+                </span>
+              </div>
             </div>
 
             {/* Tab toggle — centered */}
@@ -544,7 +550,7 @@ function AppContent() {
 
             {/* Right actions */}
             <div className="flex items-center gap-0.5 shrink-0">
-              {shareableUrl && <ShareLink url={shareableUrl} />}
+              {shareableUrl && <ShareLink url={shareableUrl} compact />}
               <QRScanner onScanSuccess={handleQRScanSuccess} />
               <ConnectionStatus
                 peerCount={readyPeers.length}
@@ -800,7 +806,7 @@ function AppContent() {
               )}
 
               {bdp.pairs.length > 0 && !vaultPairId && (
-                <div className="flex justify-center pb-4">
+                <div className="flex justify-center">
                   <Button
                     variant="outline"
                     size="sm"
@@ -812,6 +818,9 @@ function AppContent() {
                   </Button>
                 </div>
               )}
+
+              {/* BDP Protocol info — collapsible, always at the bottom */}
+              <BDPProtocolInfo />
             </div>
           </main>
         )}
