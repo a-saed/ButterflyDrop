@@ -29,6 +29,12 @@ import {
   RefreshCw,
   X,
   AlertTriangle,
+  CheckCircle2,
+  FolderSync,
+  Loader2,
+  FileUp,
+  Link2,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDropzone } from "react-dropzone";
@@ -58,7 +64,7 @@ function AppContent() {
   } = useServerWarmup();
   const session = useSession();
   const { joinSession } = session;
-  const { peers, isScanning } = usePeerDiscovery();
+  const { peers } = usePeerDiscovery();
   const { connectionState } = useConnection();
   const {
     getDataChannelForPeer,
@@ -685,105 +691,304 @@ function AppContent() {
             />
           </div>
 
-          {/* Bottom Panel - File Selection & Send Progress */}
-          <div className="absolute bottom-0 left-0 right-0 px-6 pb-6">
-            <div className="max-w-4xl mx-auto space-y-4">
-              {/* Connection Status */}
-              {isScanning && peers.length === 0 && (
-                <div className="text-center text-sm text-muted-foreground mb-2">
-                  Waiting for devices to connect...
-                </div>
+          {/* ── Bottom Action Panel ─────────────────────────────────────── */}
+          <div className="absolute bottom-0 left-0 right-0 px-4 sm:px-6 pb-4 sm:pb-6">
+            <div className="max-w-2xl mx-auto space-y-3">
+              {/* ── ACTIVE TRANSFER: Send progress ── */}
+              {(isSending || sendComplete || sendError) && (
+                <SendProgressPanel
+                  isSending={isSending}
+                  sendProgress={sendProgress}
+                  sendComplete={sendComplete}
+                  sendError={sendError}
+                  peerName={
+                    sendingToPeer
+                      ? peers.find((p) => p.id === sendingToPeer)?.name ||
+                        "peer"
+                      : selectedPeerName
+                  }
+                  onReset={resetSendState}
+                />
               )}
 
-              {/* Send Progress Panel */}
-              <SendProgressPanel
-                isSending={isSending}
-                sendProgress={sendProgress}
-                sendComplete={sendComplete}
-                sendError={sendError}
-                peerName={
-                  sendingToPeer
-                    ? peers.find((p) => p.id === sendingToPeer)?.name || "peer"
-                    : selectedPeerName
-                }
-                onReset={resetSendState}
-              />
-
-              {/* File Selection Area - Only show when not sending */}
-              {!isSending && !sendComplete && (
-                <>
-                  {selectedFiles.length > 0 ? (
-                    <div className="bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl p-4 shadow-2xl">
-                      <FileList
-                        files={selectedFiles}
-                        onRemove={handleRemoveFile}
-                        onClear={handleClearFiles}
-                      />
-
-                      {/* Send Button */}
-                      {canSend && (
-                        <div className="flex justify-center mt-4">
-                          <Button
-                            size="lg"
-                            onClick={handleSend}
-                            className="gap-2 min-w-60 h-12 text-base shadow-lg hover:shadow-xl transition-all"
-                          >
-                            <Send className="h-5 w-5" />
-                            Send {selectedFiles.length} file
-                            {selectedFiles.length > 1 ? "s" : ""} to{" "}
-                            {selectedPeerName}
-                          </Button>
+              {/* ── NORMAL STATE (not transferring) ── */}
+              {!isSending &&
+                !sendComplete &&
+                !sendError &&
+                (() => {
+                  // ── State A: Files selected → show file list + send action ──
+                  if (selectedFiles.length > 0) {
+                    return (
+                      <div className="bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl overflow-hidden">
+                        {/* Files list */}
+                        <div className="p-4">
+                          <FileList
+                            files={selectedFiles}
+                            onRemove={handleRemoveFile}
+                            onClear={handleClearFiles}
+                          />
                         </div>
-                      )}
 
-                      {/* Waiting for peer */}
-                      {selectedFiles.length > 0 &&
-                        !canSend &&
-                        peers.length === 0 && (
-                          <div className="text-center mt-4 text-sm text-muted-foreground">
-                            <p>
-                              Share the link above to connect with another
-                              device
-                            </p>
+                        {/* Send footer */}
+                        <div className="px-4 pb-4 border-t border-border/40 pt-3 flex items-center gap-3">
+                          {/* Peer selector pill */}
+                          {readyPeers.length > 1 && (
+                            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border/60 bg-muted/40 text-xs font-medium text-muted-foreground cursor-pointer hover:bg-muted/70 transition-colors">
+                              <span className="truncate max-w-[120px]">
+                                {selectedPeerName}
+                              </span>
+                              <ChevronDown className="h-3 w-3 shrink-0" />
+                            </div>
+                          )}
+
+                          {/* Status / action */}
+                          <div className="flex-1 flex justify-end">
+                            {/* Ready to send */}
+                            {canSend && (
+                              <Button
+                                size="lg"
+                                onClick={handleSend}
+                                className="gap-2 h-11 px-6 text-sm font-semibold shadow-lg hover:shadow-xl transition-all"
+                              >
+                                <Send className="h-4 w-4" />
+                                Send to {selectedPeerName}
+                              </Button>
+                            )}
+
+                            {/* No peers yet */}
+                            {selectedFiles.length > 0 &&
+                              !canSend &&
+                              peers.length === 0 && (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                  <Link2 className="h-4 w-4 shrink-0" />
+                                  <span>
+                                    Share your link to connect a device first
+                                  </span>
+                                </div>
+                              )}
+
+                            {/* Peer connecting */}
+                            {selectedFiles.length > 0 &&
+                              !canSend &&
+                              peers.length > 0 &&
+                              selectedPeerId &&
+                              !isPeerReady(selectedPeerId) && (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                                  <span>Connecting to {selectedPeerName}…</span>
+                                </div>
+                              )}
+
+                            {/* Peer connected but none selected */}
+                            {selectedFiles.length > 0 &&
+                              !canSend &&
+                              peers.length > 0 &&
+                              !selectedPeerId && (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                  <span>Tap a device above to select it</span>
+                                </div>
+                              )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // ── State B: No files yet ──
+                  return (
+                    <div className="bg-background/90 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl overflow-hidden">
+                      {/* ── Step strip ── */}
+                      {(() => {
+                        const hasPeer = readyPeers.length > 0;
+                        return (
+                          <div className="flex items-center gap-0 border-b border-border/40 px-4 py-2.5 bg-muted/20">
+                            {/* Step 1 */}
+                            <div
+                              className={cn(
+                                "flex items-center gap-1.5 text-xs font-medium transition-colors",
+                                hasPeer
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : "text-primary",
+                              )}
+                            >
+                              {hasPeer ? (
+                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                              ) : (
+                                <span className="h-4 w-4 rounded-full border-2 border-current flex items-center justify-center text-[10px] font-bold shrink-0">
+                                  1
+                                </span>
+                              )}
+                              <span className="hidden sm:inline">
+                                Connect device
+                              </span>
+                              <span className="sm:hidden">Connect</span>
+                            </div>
+
+                            <div className="w-6 h-px bg-border/60 mx-2 shrink-0" />
+
+                            {/* Step 2 */}
+                            <div
+                              className={cn(
+                                "flex items-center gap-1.5 text-xs font-medium transition-colors",
+                                hasPeer
+                                  ? "text-primary"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  "h-4 w-4 rounded-full border-2 flex items-center justify-center text-[10px] font-bold shrink-0",
+                                  hasPeer
+                                    ? "border-primary"
+                                    : "border-muted-foreground/40",
+                                )}
+                              >
+                                2
+                              </span>
+                              <span className="hidden sm:inline">
+                                Drop your files
+                              </span>
+                              <span className="sm:hidden">Drop files</span>
+                            </div>
+
+                            <div className="w-6 h-px bg-border/60 mx-2 shrink-0" />
+
+                            {/* Step 3 */}
+                            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                              <span className="h-4 w-4 rounded-full border-2 border-muted-foreground/40 flex items-center justify-center text-[10px] font-bold shrink-0">
+                                3
+                              </span>
+                              <span>Send</span>
+                            </div>
+
+                            {/* Connected peer badge */}
+                            {hasPeer && selectedPeerId && (
+                              <div className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                <span className="truncate max-w-[100px]">
+                                  {selectedPeerName}
+                                </span>
+                              </div>
+                            )}
+                            {hasPeer && !selectedPeerId && (
+                              <div className="ml-auto text-xs text-muted-foreground italic">
+                                Tap a device ↑
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* ── Drop zone body ── */}
+                      <div className="p-4">
+                        {readyPeers.length === 0 ? (
+                          /* No peer connected yet */
+                          <div className="flex flex-col sm:flex-row items-center gap-4 py-2">
+                            <div className="flex-1 text-center sm:text-left">
+                              <p className="text-sm font-medium mb-1">
+                                Waiting for a device to connect
+                              </p>
+                              <p className="text-xs text-muted-foreground leading-relaxed">
+                                Share your link or let someone scan your QR code
+                                — once they open it, you'll be connected
+                                instantly.
+                              </p>
+                            </div>
+                            <div className="flex gap-2 shrink-0">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5 text-xs"
+                                onClick={() =>
+                                  document.getElementById("file-input")?.click()
+                                }
+                              >
+                                <FileUp className="h-3.5 w-3.5" />
+                                Pick files
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          /* Peer ready — show drop zone */
+                          <div
+                            className={cn(
+                              "group relative flex flex-col sm:flex-row items-center gap-4",
+                              "border-2 border-dashed rounded-xl p-4 transition-all duration-200",
+                              isDragActive
+                                ? "border-primary bg-primary/5 scale-[1.01]"
+                                : "border-border/50 hover:border-primary/40 hover:bg-muted/30",
+                            )}
+                          >
+                            {/* Icon */}
+                            <div
+                              className={cn(
+                                "flex items-center justify-center h-14 w-14 rounded-2xl shrink-0 transition-colors",
+                                isDragActive
+                                  ? "bg-primary/10 text-primary"
+                                  : "bg-muted/60 text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary",
+                              )}
+                            >
+                              {isDragActive ? (
+                                <Upload className="h-7 w-7 animate-bounce" />
+                              ) : (
+                                <Upload className="h-7 w-7" />
+                              )}
+                            </div>
+
+                            {/* Text */}
+                            <div className="flex-1 text-center sm:text-left">
+                              <p className="text-sm font-semibold mb-0.5">
+                                {isDragActive
+                                  ? "Release to add files"
+                                  : "Drop files or folders here"}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {isDragActive
+                                  ? `Will send to ${selectedPeerName}`
+                                  : "They'll be sent directly to the connected device — no upload needed"}
+                              </p>
+                            </div>
+
+                            {/* Buttons */}
+                            {!isDragActive && (
+                              <div className="flex gap-2 shrink-0">
+                                <Button
+                                  variant="default"
+                                  size="sm"
+                                  className="gap-1.5 text-xs h-9"
+                                  onClick={() =>
+                                    document
+                                      .getElementById("file-input")
+                                      ?.click()
+                                  }
+                                >
+                                  <FileUp className="h-3.5 w-3.5" />
+                                  Browse files
+                                </Button>
+                                {selectedPeerId &&
+                                  isPeerReady(selectedPeerId) && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="gap-1.5 text-xs h-9"
+                                      onClick={() =>
+                                        handleSyncWithPeer(selectedPeerId)
+                                      }
+                                    >
+                                      <FolderSync className="h-3.5 w-3.5" />
+                                      Sync folder
+                                    </Button>
+                                  )}
+                              </div>
+                            )}
                           </div>
                         )}
-
-                      {/* Waiting for connection */}
-                      {selectedFiles.length > 0 &&
-                        !canSend &&
-                        peers.length > 0 &&
-                        selectedPeerId &&
-                        !isPeerReady(selectedPeerId) && (
-                          <div className="text-center mt-4 text-sm text-muted-foreground">
-                            <p>
-                              Establishing connection with {selectedPeerName}...
-                            </p>
-                          </div>
-                        )}
+                      </div>
                     </div>
-                  ) : (
-                    <div className="bg-background/80 backdrop-blur-sm border border-border/50 rounded-2xl p-6 text-center">
-                      <Upload className="h-10 w-10 text-muted-foreground/50 mx-auto mb-2" />
-                      <p className="text-sm text-muted-foreground mb-3">
-                        {peers.length > 0
-                          ? "Drop files anywhere or click to select"
-                          : "Scan a QR code or share the link to connect, then drop files to send"}
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          document.getElementById("file-input")?.click()
-                        }
-                      >
-                        <Upload className="h-4 w-4 mr-2" />
-                        Select Files
-                      </Button>
-                    </div>
-                  )}
-                </>
-              )}
+                  );
+                })()}
 
+              {/* Hidden file input */}
               <input
                 id="file-input"
                 type="file"

@@ -19,6 +19,9 @@
 
 import { useMemo } from "react";
 import {
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
   HardDrive,
   RefreshCw,
   Folder,
@@ -29,7 +32,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  ArrowUpDown,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -37,10 +39,10 @@ import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
+  CardDescription,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
@@ -113,10 +115,8 @@ function getPairStatus(
         (sum, e) => sum + e.size,
         0,
       );
-
       const done =
         state.sessionStats.bytesUploaded + state.sessionStats.bytesDownloaded;
-
       const progress = total > 0 ? Math.min(100, (done / total) * 100) : 0;
       return { kind: "syncing", label: "Syncing…", progress };
     }
@@ -220,6 +220,26 @@ function formatBytes(bytes: number): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Direction icon helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+function DirectionIcon({ direction }: { direction: SyncPair["direction"] }) {
+  if (direction === "upload-only") {
+    return <ArrowUp className="size-3" />;
+  }
+  if (direction === "download-only") {
+    return <ArrowDown className="size-3" />;
+  }
+  return <ArrowUpDown className="size-3" />;
+}
+
+function directionLabel(direction: SyncPair["direction"]): string {
+  if (direction === "upload-only") return "Upload only";
+  if (direction === "download-only") return "Download only";
+  return "Bidirectional";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PairCard
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -241,6 +261,7 @@ function PairCard({
   const status = useMemo(() => getPairStatus(pair, state), [pair, state]);
   const styles = STATUS_STYLES[status.kind];
 
+  // The "other" device in the pair (not this device)
   const peerDevice = pair.devices.find(
     (d) => d.deviceId !== pair.devices[0]?.deviceId,
   );
@@ -252,10 +273,11 @@ function PairCard({
   const isBusy = status.kind === "syncing" || status.kind === "connecting";
 
   return (
-    <Card className="flex flex-col transition-shadow hover:shadow-md">
+    <Card className="flex flex-col transition-shadow hover:shadow-md w-full">
       <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-start justify-between gap-2 flex-wrap">
+          {/* Folder info */}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             <div className="shrink-0 flex items-center justify-center size-9 rounded-lg bg-primary/10 text-primary">
               <Folder className="size-5" />
             </div>
@@ -267,10 +289,12 @@ function PairCard({
                 {peerDevice ? (
                   <span className="flex items-center gap-1">
                     <HardDrive className="size-3 shrink-0" />
-                    {peerDevice.deviceName}
+                    <span className="truncate">{peerDevice.deviceName}</span>
                   </span>
                 ) : (
-                  <span className="italic">Waiting for peer…</span>
+                  <span className="italic text-muted-foreground/70">
+                    Waiting for peer…
+                  </span>
                 )}
               </CardDescription>
             </div>
@@ -279,7 +303,7 @@ function PairCard({
           {/* Status badge */}
           <Badge
             className={cn(
-              "shrink-0 flex items-center gap-1 text-[11px] px-2 py-0.5 border",
+              "shrink-0 flex items-center gap-1 text-[11px] px-2 py-0.5 border whitespace-nowrap",
               styles.badge,
             )}
           >
@@ -296,11 +320,10 @@ function PairCard({
         )}
 
         {/* Stats row */}
-        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+        <div className="flex items-center justify-between text-[11px] text-muted-foreground gap-2 flex-wrap">
           <span>Last sync: {formatRelativeTime(pair.lastSyncedAt)}</span>
-
           {sessionBytes > 0 && (
-            <span className="flex items-center gap-0.5">
+            <span className="flex items-center gap-0.5 shrink-0">
               <ArrowUpDown className="size-3" />
               {formatBytes(sessionBytes)}
             </span>
@@ -323,14 +346,19 @@ function PairCard({
           </p>
         )}
 
+        {/* Offline hint */}
+        {status.kind === "offline" && (
+          <p className="text-[11px] text-muted-foreground/70 bg-muted/40 rounded px-2 py-1">
+            Open Butterfly Drop on the paired device and connect to this session
+            to start syncing.
+          </p>
+        )}
+
         {/* Direction badge */}
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded border bg-muted/40">
-            {pair.direction === "bidirectional"
-              ? "↕ Bidirectional"
-              : pair.direction === "upload-only"
-                ? "↑ Upload only"
-                : "↓ Download only"}
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground px-1.5 py-0.5 rounded border bg-muted/40">
+            <DirectionIcon direction={pair.direction} />
+            {directionLabel(pair.direction)}
           </span>
           {pair.localFolder.useRealFS && (
             <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded border bg-muted/40">
@@ -340,11 +368,11 @@ function PairCard({
         </div>
       </CardContent>
 
-      <CardFooter className="pt-2 gap-2 mt-auto">
+      <CardFooter className="pt-2 gap-2 mt-auto flex-wrap">
         <Button
           variant="outline"
           size="sm"
-          className="flex-1 text-xs h-8"
+          className="flex-1 text-xs h-8 min-w-20"
           onClick={onSyncNow}
           disabled={isBusy || status.kind === "offline"}
           title={
@@ -353,24 +381,24 @@ function PairCard({
               : "Trigger a manual sync"
           }
         >
-          <RefreshCw className="size-3.5" />
+          <RefreshCw className="size-3.5 mr-1" />
           Sync Now
         </Button>
 
         <Button
           variant="outline"
           size="sm"
-          className="flex-1 text-xs h-8"
+          className="flex-1 text-xs h-8 min-w-20"
           onClick={onViewVault}
         >
-          <Folder className="size-3.5" />
+          <Folder className="size-3.5 mr-1" />
           Files
         </Button>
 
         <Button
           variant="ghost"
-          size="icon-sm"
-          className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 h-8 w-8"
+          size="icon"
+          className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 h-8 w-8 shrink-0"
           onClick={onDeletePair}
           title="Delete this sync pair"
         >
@@ -387,16 +415,16 @@ function PairCard({
 
 function EmptyState({ onAddPair }: { onAddPair(): void }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-      <div className="flex items-center justify-center size-16 rounded-2xl bg-primary/10 text-primary mb-4">
-        <ArrowUpDown className="size-8" />
+    <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+      <div className="flex items-center justify-center size-14 rounded-2xl bg-primary/10 text-primary mb-4">
+        <ArrowUpDown className="size-7" />
       </div>
-      <h3 className="text-lg font-semibold mb-1">No sync pairs yet</h3>
-      <p className="text-sm text-muted-foreground max-w-xs mb-6">
+      <h3 className="text-sm font-semibold mb-1">No sync pairs yet</h3>
+      <p className="text-xs text-muted-foreground max-w-55 mb-5 leading-relaxed">
         Create a sync pair to share folders directly between your devices —
         peer-to-peer, end-to-end encrypted, no cloud required.
       </p>
-      <Button onClick={onAddPair} className="gap-2">
+      <Button onClick={onAddPair} size="sm" className="gap-2">
         <Plus className="size-4" />
         Add Sync Pair
       </Button>
@@ -440,7 +468,7 @@ export function SyncDashboard({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold">Sync Pairs</h2>
+          <h2 className="text-sm font-semibold">Sync Pairs</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             {pairs.length === 0
               ? "No pairs configured"
@@ -464,11 +492,11 @@ export function SyncDashboard({
         )}
       </div>
 
-      {/* Content */}
+      {/* Content — single-column grid to fit inside the narrow side panel */}
       {pairs.length === 0 ? (
         <EmptyState onAddPair={onAddPair} />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3">
           {pairs.map((pair) => (
             <PairCard
               key={pair.pairId}
