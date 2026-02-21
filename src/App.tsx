@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useServerWarmup } from "@/hooks/useServerWarmup";
 import { ServerWarmupOverlay } from "@/components/connection/ServerWarmupOverlay";
 import { SessionProvider } from "@/contexts/SessionContext";
@@ -22,11 +22,27 @@ import { ConnectionStatus } from "@/components/connection/ConnectionStatus";
 import { createShareableUrl } from "@/lib/sessionUtils";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Upload, Send, Github } from "lucide-react";
+import {
+  Upload,
+  Send,
+  Github,
+  RefreshCw,
+  X,
+  AlertTriangle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDropzone } from "react-dropzone";
 import { useSoundEffects } from "@/hooks/useSoundEffects";
 import { SyncSheet } from "@/components/sync/SyncSheet";
+// BDP — Butterfly Delta Protocol
+import { useBDP } from "@/bdp/hooks/useBDP";
+import { SyncDashboard } from "@/bdp/components/SyncDashboard";
+import { AddPairDialog } from "@/bdp/components/AddPairDialog";
+import { VaultBrowser } from "@/bdp/components/VaultBrowser";
+import { ConflictResolver } from "@/bdp/components/ConflictResolver";
+import { SyncProgress } from "@/bdp/components/SyncProgress";
+import type { PairId } from "@/types/bdp";
+import { cn } from "@/lib/utils";
 
 function AppContent() {
   const {
@@ -79,13 +95,52 @@ function AppContent() {
     clearReceivedFiles,
     resetSendState,
     cleanupPeer,
-    // Helpers
+    registerBDPHandler,
     formatBytes,
   } = useFileTransfer();
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedPeerId, setSelectedPeerId] = useState<string>();
   const [syncPeerId, setSyncPeerId] = useState<string | null>(null);
+
+  // ── BDP Sync ────────────────────────────────────────────────────────────────
+  const bdp = useBDP({ getDataChannelForPeer, readyPeers });
+  const [bdpPanelOpen, setBdpPanelOpen] = useState(false);
+  const [addPairOpen, setAddPairOpen] = useState(false);
+  /** null = show dashboard, PairId = show vault for that pair */
+  const [vaultPairId, setVaultPairId] = useState<PairId | null>(null);
+  /**
+   * Which pair's conflict resolver to show (null = none).
+   * Derived from engineStates so it always reflects the live session phase;
+   * the user can manually dismiss it by clicking "Defer".
+   */
+  const [dismissedConflictPairs, setDismissedConflictPairs] = useState<
+    Set<PairId>
+  >(new Set());
+
+  // Register BDP frame handler into useFileTransfer so BDP messages are
+  // intercepted before the legacy protocol parser runs.
+  useEffect(() => {
+    return registerBDPHandler(bdp.handleFrame);
+  }, [registerBDPHandler, bdp.handleFrame]);
+
+  /**
+   * Derive the pairId whose conflict resolver should be shown.
+   * Picks the first pair that is in resolving_conflict phase and has not been
+   * dismissed by the user.  Pure derivation — no setState, no refs.
+   */
+  const activeConflictPairId = useMemo<PairId | null>(() => {
+    for (const [pairId, state] of bdp.engineStates.entries()) {
+      if (
+        state.phase === "resolving_conflict" &&
+        state.pendingConflicts.length > 0 &&
+        !dismissedConflictPairs.has(pairId)
+      ) {
+        return pairId;
+      }
+    }
+    return null;
+  }, [bdp.engineStates, dismissedConflictPairs]);
 
   // Track which peers have receivers set up
   const setupPeersRef = useRef<Set<string>>(new Set());
@@ -462,6 +517,14 @@ function AppContent() {
     ? peers.find((p) => p.id === selectedPeerId)?.name || "peer"
     : "";
 
+  // ── BDP panel helpers ─────────────────────────────────────────────────────
+  const bdpConflictState = activeConflictPairId
+    ? bdp.engineStates.get(activeConflictPairId)
+    : undefined;
+  const bdpVaultPair = vaultPairId
+    ? (bdp.pairs.find((p) => p.pairId === vaultPairId) ?? null)
+    : null;
+
   return (
     <div className="min-h-screen relative" {...getRootProps()}>
       <input {...getInputProps()} />
@@ -519,6 +582,47 @@ function AppContent() {
               peerCount={readyPeers.length}
               sessionId={session.session?.id || null}
             />
+            {/* BDP Sync panel toggle */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setBdpPanelOpen((v) => !v)}
+              className={cn(
+                "h-9 w-9 relative",
+                bdpPanelOpen && "bg-primary/10 text-primary",
+              )}
+              aria-label="Sync pairs"
+              title="Butterfly Delta Protocol — folder sync"
+            >
+              <RefreshCw className="h-5 w-5" />
+              {/* Badge for active syncs or conflicts */}
+              {(() => {
+                const conflicts = [...bdp.engineStates.values()].filter(
+                  (s) => s.phase === "resolving_conflict",
+                ).length;
+                const syncing = [...bdp.engineStates.values()].filter(
+                  (s) =>
+                    s.phase === "transferring" ||
+                    s.phase === "diffing" ||
+                    s.phase === "delta_sync" ||
+                    s.phase === "full_sync",
+                ).length;
+                if (conflicts > 0)
+                  return (
+                    <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[9px] text-white font-bold">
+                      {conflicts}
+                    </span>
+                  );
+                if (syncing > 0)
+                  return (
+                    <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500" />
+                    </span>
+                  );
+                return null;
+              })()}
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -702,6 +806,158 @@ function AppContent() {
           formatBytes={formatBytes}
         />
       )}
+
+      {/* ── BDP Sync Panel ─────────────────────────────────────────────────── */}
+      {/* Slide-in panel from the right, sits above everything else */}
+      <div
+        className={cn(
+          "fixed inset-y-0 right-0 w-full sm:w-105 z-40 flex flex-col",
+          "bg-background/95 backdrop-blur-md border-l border-border/60 shadow-2xl",
+          "transition-transform duration-300 ease-in-out",
+          bdpPanelOpen ? "translate-x-0" : "translate-x-full",
+        )}
+        aria-hidden={!bdpPanelOpen}
+      >
+        {/* Panel header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 shrink-0">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="size-4 text-primary" />
+            <span className="text-sm font-semibold">Sync Pairs</span>
+            {bdp.initialising && (
+              <span className="text-xs text-muted-foreground">(loading…)</span>
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => {
+              setBdpPanelOpen(false);
+              setVaultPairId(null);
+            }}
+          >
+            <X className="size-4" />
+          </Button>
+        </div>
+
+        {/* Init error */}
+        {bdp.initError && (
+          <div className="mx-4 mt-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-900/10 px-3 py-2.5">
+            <AlertTriangle className="size-4 text-red-500 shrink-0 mt-0.5" />
+            <p className="text-xs text-red-600 dark:text-red-400">
+              {bdp.initError.message}
+            </p>
+          </div>
+        )}
+
+        {/* Panel body — scrollable */}
+        <div className="flex-1 overflow-y-auto p-4 min-h-0">
+          {/* ── Active sync progress for any transferring pair ── */}
+          {[...bdp.engineStates.entries()]
+            .filter(([, s]) =>
+              [
+                "greeting",
+                "diffing",
+                "delta_sync",
+                "full_sync",
+                "transferring",
+                "finalizing",
+              ].includes(s.phase),
+            )
+            .map(([pairId, state]) => (
+              <div key={pairId} className="mb-4">
+                <SyncProgress state={state} />
+              </div>
+            ))}
+
+          {/* ── Conflict resolver ── */}
+          {activeConflictPairId &&
+            bdpConflictState?.phase === "resolving_conflict" &&
+            bdpConflictState.pendingConflicts.length > 0 && (
+              <div className="mb-4">
+                <ConflictResolver
+                  pairId={activeConflictPairId}
+                  conflicts={bdpConflictState.pendingConflicts}
+                  localDeviceName={bdp.device?.deviceName ?? "This device"}
+                  remoteDeviceName={
+                    bdpConflictState.peerDeviceName ?? "Remote device"
+                  }
+                  onResolve={bdp.resolveConflict}
+                  onAllResolved={() =>
+                    setDismissedConflictPairs((prev) => {
+                      const next = new Set(prev);
+                      next.add(activeConflictPairId);
+                      return next;
+                    })
+                  }
+                  onDismiss={() =>
+                    setDismissedConflictPairs((prev) => {
+                      const next = new Set(prev);
+                      next.add(activeConflictPairId);
+                      return next;
+                    })
+                  }
+                />
+              </div>
+            )}
+
+          {/* ── Vault browser ── */}
+          {vaultPairId && bdpVaultPair ? (
+            <VaultBrowser
+              pairId={vaultPairId}
+              files={bdp.vaultFiles.get(vaultPairId) ?? []}
+              folderName={bdpVaultPair.localFolder.name}
+              onRefresh={() => bdp.refreshVaultFiles(vaultPairId)}
+              onClose={() => setVaultPairId(null)}
+            />
+          ) : (
+            /* ── Sync dashboard ── */
+            <SyncDashboard
+              pairs={bdp.pairs}
+              engineStates={bdp.engineStates}
+              onAddPair={() => setAddPairOpen(true)}
+              onViewVault={(pairId) => {
+                setVaultPairId(pairId);
+              }}
+              onDeletePair={async (pairId) => {
+                await bdp.deletePair(pairId);
+                toast.success("Sync pair removed");
+              }}
+              onSyncNow={(pairId) => {
+                bdp.triggerSync(pairId).catch((err) => {
+                  toast.error("Sync failed", {
+                    description:
+                      err instanceof Error ? err.message : String(err),
+                  });
+                });
+              }}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* BDP panel backdrop (mobile) */}
+      {bdpPanelOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/20 sm:hidden"
+          onClick={() => setBdpPanelOpen(false)}
+        />
+      )}
+
+      {/* Add Pair Dialog */}
+      <AddPairDialog
+        open={addPairOpen}
+        onOpenChange={setAddPairOpen}
+        device={bdp.device}
+        readyPeers={readyPeers}
+        sessionId={session.session?.id ?? ""}
+        onCreatePair={async (opts) => {
+          const pair = await bdp.createPair(opts);
+          toast.success(`Sync pair "${opts.folderName}" created`, {
+            icon: "🔗",
+          });
+          return pair;
+        }}
+      />
 
       <Toaster />
     </div>

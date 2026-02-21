@@ -1,0 +1,721 @@
+/**
+ * BDP — React Layer (Phase E)
+ *
+ * `useBDP` is the single hook that wires every BDP service into React state.
+ * It owns the lifecycle of BDPSession instances, reacts to peer connection
+ * changes, polls the relay, surfaces conflicts, and exposes all UI-facing
+ * actions.
+ *
+ * Architecture:
+ *   - One BDPSession per active peer connection (keyed by WebRTC peerId)
+ *   - Sessions are created when a peer becomes ready and a matching SyncPair exists
+ *   - Sessions are destroyed when the peer disconnects
+ *   - Relay is pulled on mount and on window focus
+ *
+ * Integration touch points:
+ *   - useWebRTCContext() → getDataChannelForPeer, readyPeers
+ *   - useFileTransfer → handleFrame (called when a BDP message arrives)
+ *   - App.tsx → renders <SyncDashboard> with the values returned here
+ *
+ * Dependencies: All Phase A–D services
+ */
+
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { nanoid } from "nanoid";
+
+import type {
+  BDPConflict,
+  BDPDevice,
+  BDPEngineState,
+  ConflictResolution,
+  DeviceId,
+  PairId,
+  SyncDirection,
+  ConflictStrategy,
+  SyncPair,
+  VaultFileInfo,
+} from "@/types/bdp";
+import { BDP_CONSTANTS } from "@/types/bdp";
+
+import { getOrCreateDevice, setDeviceName } from "@/bdp/services/device";
+import {
+  getAllPairs,
+  putPair,
+  deletePair as idbDeletePair,
+  getPendingConflicts,
+  resolveConflict as idbResolveConflict,
+  getAllFileEntries,
+  deleteFileEntry,
+  getAllMerkleNodes,
+  deleteMerkleNode,
+} from "@/bdp/services/idb";
+import { initVault, listVaultFiles } from "@/bdp/services/opfsVault";
+import { BDPSession } from "@/bdp/services/session";
+import { tryDecodeFrame } from "@/bdp/services/protocol";
+import { pullDeltas } from "@/bdp/services/relayClient";
+import { applyDeltaEntries } from "@/bdp/services/merkleIndex";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface UseBDPOptions {
+  /** From useWebRTCContext — returns the open DataChannel for a peer, or null */
+  getDataChannelForPeer: (peerId: string) => RTCDataChannel | null;
+  /** From useWebRTCContext — list of peer IDs whose DataChannels are open */
+  readyPeers: string[];
+}
+
+export interface CreatePairOptions {
+  /** Display name for the local folder (shown in the UI) */
+  folderName: string;
+  /** Real FS handle — only present on Chrome/Edge via showDirectoryPicker() */
+  handle?: FileSystemDirectoryHandle | null;
+  /** Whether to write-through to the real FS when files are received */
+  useRealFS?: boolean;
+  direction?: SyncDirection;
+  conflictStrategy?: ConflictStrategy;
+  /** The remote peer's device info — added after QR handshake */
+  peerInfo?: {
+    deviceId: DeviceId;
+    deviceName: string;
+    publicKeyB64: string;
+  };
+}
+
+export interface UseBDPReturn {
+  // ── State ────────────────────────────────────────────────────────────────
+  /** The local device record (null until async init resolves) */
+  device: BDPDevice | null;
+  /** All persisted sync pairs */
+  pairs: SyncPair[];
+  /** Per-pair engine state, keyed by pairId */
+  engineStates: Map<PairId, BDPEngineState>;
+  /** Per-pair vault file listings, keyed by pairId */
+  vaultFiles: Map<PairId, VaultFileInfo[]>;
+  /** Per-pair pending conflicts requiring user action, keyed by pairId */
+  pendingConflicts: Map<PairId, BDPConflict[]>;
+  /** true while the initial async setup is running */
+  initialising: boolean;
+  /** Non-null when initialisation failed */
+  initError: Error | null;
+
+  // ── Actions ──────────────────────────────────────────────────────────────
+  /** Creates a new SyncPair and persists it to IndexedDB */
+  createPair(options: CreatePairOptions): Promise<SyncPair>;
+  /** Deletes a pair and cleans up its index/merkle data from IDB */
+  deletePair(pairId: PairId): Promise<void>;
+  /** Manually triggers a sync with any currently connected peer for a pair */
+  triggerSync(pairId: PairId): Promise<void>;
+  /** Resolves a file conflict and propagates the resolution to the peer */
+  resolveConflict(
+    pairId: PairId,
+    path: string,
+    resolution: ConflictResolution,
+  ): Promise<void>;
+  /** Re-lists vault files for a pair — call after a sync completes */
+  refreshVaultFiles(pairId: PairId): Promise<void>;
+  /** Updates the device name displayed to peers */
+  updateDeviceName(name: string): Promise<void>;
+
+  /**
+   * Called by useFileTransfer for every raw DataChannel message.
+   * Returns true if the message was a BDP frame (consumed), false otherwise.
+   * Non-BDP messages are rejected cheaply via isBDPMessage() before any parse.
+   */
+  handleFrame(peerId: string, raw: string | ArrayBuffer): boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hook
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function useBDP({
+  getDataChannelForPeer,
+  readyPeers,
+}: UseBDPOptions): UseBDPReturn {
+  // ── Core state ────────────────────────────────────────────────────────────
+  const [device, setDevice] = useState<BDPDevice | null>(null);
+  const [pairs, setPairs] = useState<SyncPair[]>([]);
+  const [engineStates, setEngineStates] = useState<Map<PairId, BDPEngineState>>(
+    new Map(),
+  );
+  const [vaultFiles, setVaultFiles] = useState<Map<PairId, VaultFileInfo[]>>(
+    new Map(),
+  );
+  const [pendingConflicts, setPendingConflicts] = useState<
+    Map<PairId, BDPConflict[]>
+  >(new Map());
+  const [initialising, setInitialising] = useState(true);
+  const [initError, setInitError] = useState<Error | null>(null);
+
+  // ── Refs ──────────────────────────────────────────────────────────────────
+  /** Active BDPSession instances, keyed by WebRTC peerId */
+  const sessionsRef = useRef<Map<string, BDPSession>>(new Map());
+
+  /** Stable snapshot of the previous readyPeers list for diff calculation */
+  const prevReadyPeersRef = useRef<string[]>([]);
+
+  /**
+   * Stable refs for mutable values consumed inside callbacks.
+   * Using refs avoids stale closures without adding pairs/device to
+   * useEffect dependency arrays (which would cause thrashing).
+   */
+  const pairsRef = useRef<SyncPair[]>([]);
+  const deviceRef = useRef<BDPDevice | null>(null);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    pairsRef.current = pairs;
+  }, [pairs]);
+
+  useEffect(() => {
+    deviceRef.current = device;
+  }, [device]);
+
+  // ── Initialisation ────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function init() {
+      try {
+        // Boot the OPFS vault directory structure
+        await initVault();
+
+        // Load (or create) the device identity
+        const d = await getOrCreateDevice();
+        if (cancelled) return;
+        setDevice(d);
+
+        // Load persisted pairs
+        const savedPairs = await getAllPairs();
+        if (cancelled) return;
+        setPairs(savedPairs);
+
+        // Load initial vault files for each pair
+        const filesMap = new Map<PairId, VaultFileInfo[]>();
+        for (const pair of savedPairs) {
+          const files = await listVaultFiles(pair.pairId).catch(() => []);
+          filesMap.set(pair.pairId, files);
+        }
+        if (cancelled) return;
+        setVaultFiles(filesMap);
+
+        // Load pending conflicts for each pair
+        const conflictsMap = new Map<PairId, BDPConflict[]>();
+        for (const pair of savedPairs) {
+          const records = await getPendingConflicts(pair.pairId).catch(
+            () => [],
+          );
+          // ConflictRecord → BDPConflict (subset of fields)
+          const conflicts: BDPConflict[] = records.map((r) => ({
+            path: r.path,
+            local: r.local,
+            remote: r.remote,
+            autoResolution: r.autoResolution,
+          }));
+          conflictsMap.set(pair.pairId, conflicts);
+        }
+        if (cancelled) return;
+        setPendingConflicts(conflictsMap);
+      } catch (err) {
+        if (!cancelled) {
+          setInitError(err instanceof Error ? err : new Error(String(err)));
+        }
+      } finally {
+        if (!cancelled) setInitialising(false);
+      }
+    }
+
+    void init();
+    return () => {
+      cancelled = true;
+    };
+  }, []); // run once on mount
+
+  // ── Relay pull ────────────────────────────────────────────────────────────
+
+  /**
+   * Pulls encrypted relay deltas for all pairs and applies them to the local
+   * Merkle index. Called on mount and on window focus.
+   */
+  const pullAllRelayDeltas = useCallback(async () => {
+    const currentDevice = deviceRef.current;
+    const currentPairs = pairsRef.current;
+    if (!currentDevice || currentPairs.length === 0) return;
+
+    for (const pair of currentPairs) {
+      try {
+        const payloads = await pullDeltas(pair.pairId);
+        for (const payload of payloads) {
+          if (payload.deltaEntries?.length) {
+            await applyDeltaEntries(pair.pairId, payload.deltaEntries);
+          }
+        }
+      } catch (err) {
+        // Relay is best-effort — log in dev, silent in prod
+        if (import.meta.env.DEV) {
+          console.warn(
+            `[useBDP] relay pull failed for pair ${pair.pairId}:`,
+            err,
+          );
+        }
+      }
+    }
+  }, []); // stable — reads from refs
+
+  useEffect(() => {
+    // Pull immediately after init resolves (pairs may not be loaded yet on
+    // first render, but pairs effect will trigger another pull after load)
+    void pullAllRelayDeltas();
+
+    const onFocus = () => void pullAllRelayDeltas();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [pullAllRelayDeltas]);
+
+  // Re-pull whenever the pairs list changes (e.g. after createPair)
+  useEffect(() => {
+    if (pairs.length > 0 && device) {
+      void pullAllRelayDeltas();
+    }
+  }, [pairs, device, pullAllRelayDeltas]);
+
+  // ── Session lifecycle (peer connect / disconnect) ─────────────────────────
+
+  useEffect(() => {
+    const currentDevice = deviceRef.current;
+    const currentPairs = pairsRef.current;
+
+    const readyArray = Array.from(readyPeers);
+    const newPeers = readyArray.filter(
+      (id) => !prevReadyPeersRef.current.includes(id),
+    );
+    const gonePeers = prevReadyPeersRef.current.filter(
+      (id) => !readyArray.includes(id),
+    );
+    prevReadyPeersRef.current = readyArray;
+
+    // ── Tear down sessions for disconnected peers ──────────────────────────
+    for (const peerId of gonePeers) {
+      const session = sessionsRef.current.get(peerId);
+      if (session) {
+        session.stop();
+        sessionsRef.current.delete(peerId);
+
+        if (import.meta.env.DEV) {
+          console.log(`[useBDP] session stopped for peer ${peerId}`);
+        }
+      }
+    }
+
+    // ── Start sessions for newly connected peers ───────────────────────────
+    if (!currentDevice) return;
+
+    for (const peerId of newPeers) {
+      // Skip if we already have an active session for this peer
+      if (sessionsRef.current.has(peerId)) continue;
+
+      // Find a matching SyncPair that includes this peer's deviceId
+      // Note: at the WebRTC level, peerId is the WebRTC peer ID (not BDP deviceId).
+      // The pair's devices list uses BDP deviceIds. We match on both as a fallback.
+      const matchingPair = currentPairs.find(
+        (p) =>
+          p.devices.some((d) => d.deviceId === peerId) ||
+          p.devices.some((d) => d.deviceId === (peerId as DeviceId)),
+      );
+
+      if (!matchingPair) {
+        // No pair configured for this peer — skip silently
+        // (the peer may be a plain file-transfer peer, not a BDP pair)
+        continue;
+      }
+
+      const dc = getDataChannelForPeer(peerId);
+      if (!dc) {
+        if (import.meta.env.DEV) {
+          console.warn(
+            `[useBDP] no DataChannel for peer ${peerId}, skipping session`,
+          );
+        }
+        continue;
+      }
+
+      const peerInfo = matchingPair.devices.find(
+        (d) => d.deviceId !== currentDevice.deviceId,
+      );
+
+      const session = new BDPSession({
+        pairId: matchingPair.pairId,
+        myDeviceId: currentDevice.deviceId,
+        peerDeviceId: peerId as DeviceId,
+        peerDeviceName: peerInfo?.deviceName ?? "Unknown",
+        dataChannel: dc,
+        device: currentDevice,
+      });
+
+      // Propagate state changes into React state
+      const unsubscribeState = session.on("stateChange", (state) => {
+        setEngineStates((prev) =>
+          new Map(prev).set(matchingPair.pairId, state),
+        );
+
+        // When a sync completes, refresh vault files and conflicts
+        if (state.phase === "idle" || state.phase === "finalizing") {
+          void refreshVaultFilesInternal(matchingPair.pairId);
+          void refreshConflictsInternal(matchingPair.pairId);
+        }
+      });
+
+      // Clean up listener when the session stops
+      session.on("stopped", () => {
+        unsubscribeState();
+      });
+
+      sessionsRef.current.set(peerId, session);
+
+      if (import.meta.env.DEV) {
+        console.log(
+          `[useBDP] starting session for peer ${peerId} / pair ${matchingPair.pairId}`,
+        );
+      }
+
+      session.start().catch((err) => {
+        if (import.meta.env.DEV) {
+          console.error(`[useBDP] session.start() failed for ${peerId}:`, err);
+        }
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readyPeers, getDataChannelForPeer]);
+  // Note: pairs and device are intentionally read from refs to avoid re-running
+  // this effect every time a pair is added (which would duplicate sessions).
+
+  // ── Internal helpers ──────────────────────────────────────────────────────
+
+  const refreshVaultFilesInternal = useCallback(
+    async (pairId: PairId): Promise<void> => {
+      try {
+        const files = await listVaultFiles(pairId);
+        setVaultFiles((prev) => new Map(prev).set(pairId, files));
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn(`[useBDP] vault refresh failed for ${pairId}:`, err);
+        }
+      }
+    },
+    [],
+  );
+
+  const refreshConflictsInternal = useCallback(
+    async (pairId: PairId): Promise<void> => {
+      try {
+        const records = await getPendingConflicts(pairId);
+        const conflicts: BDPConflict[] = records.map((r) => ({
+          path: r.path,
+          local: r.local,
+          remote: r.remote,
+          autoResolution: r.autoResolution,
+        }));
+        setPendingConflicts((prev) => new Map(prev).set(pairId, conflicts));
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn(`[useBDP] conflict refresh failed for ${pairId}:`, err);
+        }
+      }
+    },
+    [],
+  );
+
+  // ── Public actions ────────────────────────────────────────────────────────
+
+  /**
+   * Decodes a raw DataChannel message and dispatches it to the matching session.
+   * Returns true if the message was a BDP frame (consumed), false if it is not
+   * a BDP message and should be passed to the legacy protocol handler.
+   */
+  const handleFrame = useCallback(
+    (peerId: string, raw: string | ArrayBuffer): boolean => {
+      const result = tryDecodeFrame(raw);
+      if (!result) return false; // not a BDP message — let legacy handler process it
+
+      const session = sessionsRef.current.get(peerId);
+      if (!session) {
+        if (import.meta.env.DEV) {
+          console.warn(
+            `[useBDP] received BDP frame from unknown peer ${peerId}`,
+          );
+        }
+        // Still consumed — we recognised it as BDP, just no session yet
+        return true;
+      }
+
+      session.handleFrame(result.frame, result.chunkData);
+      return true;
+    },
+    [],
+  );
+
+  /**
+   * Creates a new SyncPair, persists it to IDB, and updates React state.
+   */
+  const createPair = useCallback(
+    async (options: CreatePairOptions): Promise<SyncPair> => {
+      const currentDevice = deviceRef.current;
+      if (!currentDevice) {
+        throw new Error("BDP device not initialised yet — retry in a moment");
+      }
+
+      const pairId = nanoid(32) as PairId;
+
+      const devices: SyncPair["devices"] = [
+        {
+          deviceId: currentDevice.deviceId,
+          deviceName: currentDevice.deviceName,
+          publicKeyB64: currentDevice.publicKeyB64,
+          lastSeenAt: Date.now(),
+        },
+      ];
+
+      // If caller already has the peer's identity (post-QR handshake), add it
+      if (options.peerInfo) {
+        devices.push({
+          deviceId: options.peerInfo.deviceId,
+          deviceName: options.peerInfo.deviceName,
+          publicKeyB64: options.peerInfo.publicKeyB64,
+          lastSeenAt: null,
+        });
+      }
+
+      const pair: SyncPair = {
+        pairId,
+        devices,
+        localFolder: {
+          name: options.folderName,
+          handle: options.handle ?? null,
+          opfsPath: `${BDP_CONSTANTS.OPFS_VAULT}/${pairId}`,
+          useRealFS: options.useRealFS ?? false,
+        },
+        direction: options.direction ?? "bidirectional",
+        conflictStrategy: options.conflictStrategy ?? "last-write-wins",
+        includePatterns: [],
+        excludePatterns: [],
+        maxFileSizeBytes: 500 * 1024 * 1024, // 500 MB default
+        createdAt: Date.now(),
+        lastSyncedAt: null,
+        lastRelayFetchedAt: null,
+        localMerkleRoot: null,
+        knownRemoteRoots: {},
+      };
+
+      await putPair(pair);
+
+      setPairs((prev) => [...prev, pair]);
+      setVaultFiles((prev) => new Map(prev).set(pairId, []));
+      setPendingConflicts((prev) => new Map(prev).set(pairId, []));
+
+      if (import.meta.env.DEV) {
+        console.log(
+          `[useBDP] created pair ${pairId} ("${options.folderName}")`,
+        );
+      }
+
+      return pair;
+    },
+    [],
+  );
+
+  /**
+   * Deletes a SyncPair and cascades cleanup of its IDB index/merkle data.
+   * Does NOT delete OPFS vault files — the user retains their data.
+   */
+  const deletePair = useCallback(async (pairId: PairId): Promise<void> => {
+    // Stop any active session for this pair
+    for (const [peerId, session] of sessionsRef.current.entries()) {
+      if (session.pairId === pairId) {
+        session.stop();
+        sessionsRef.current.delete(peerId);
+      }
+    }
+
+    // Cascade delete file index entries for this pair
+    try {
+      const entries = await getAllFileEntries(pairId);
+      for (const entry of entries) {
+        await deleteFileEntry(pairId, entry.path);
+      }
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        console.warn(`[useBDP] cascade delete fileIndex failed:`, err);
+      }
+    }
+
+    // Cascade delete merkle nodes for this pair
+    try {
+      const nodes = await getAllMerkleNodes(pairId);
+      for (const node of nodes) {
+        await deleteMerkleNode(pairId, node.nodePath);
+      }
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        console.warn(`[useBDP] cascade delete merkleNodes failed:`, err);
+      }
+    }
+
+    // Delete the pair record itself
+    await idbDeletePair(pairId);
+
+    // Update React state
+    setPairs((prev) => prev.filter((p) => p.pairId !== pairId));
+    setEngineStates((prev) => {
+      const next = new Map(prev);
+      next.delete(pairId);
+      return next;
+    });
+    setVaultFiles((prev) => {
+      const next = new Map(prev);
+      next.delete(pairId);
+      return next;
+    });
+    setPendingConflicts((prev) => {
+      const next = new Map(prev);
+      next.delete(pairId);
+      return next;
+    });
+
+    if (import.meta.env.DEV) {
+      console.log(`[useBDP] deleted pair ${pairId}`);
+    }
+  }, []);
+
+  /**
+   * Manually triggers a sync for a pair by restarting its active session.
+   * No-op if no peer is currently connected for this pair.
+   */
+  const triggerSync = useCallback(async (pairId: PairId): Promise<void> => {
+    for (const [, session] of sessionsRef.current.entries()) {
+      if (session.pairId === pairId && !session.stopped) {
+        // Session is already running — re-run the hello phase to kick off a sync
+        await session.start().catch((err) => {
+          if (import.meta.env.DEV) {
+            console.warn(`[useBDP] triggerSync failed for ${pairId}:`, err);
+          }
+        });
+        return;
+      }
+    }
+
+    if (import.meta.env.DEV) {
+      console.info(
+        `[useBDP] triggerSync: no active session for pair ${pairId}`,
+      );
+    }
+  }, []);
+
+  /**
+   * Resolves a conflict by delegating to the active BDPSession, which sends
+   * the resolution to the peer and applies it locally. Also updates IDB and
+   * React state.
+   */
+  const resolveConflict = useCallback(
+    async (
+      pairId: PairId,
+      path: string,
+      resolution: ConflictResolution,
+    ): Promise<void> => {
+      // Delegate to the active session (handles peer notification)
+      for (const [, session] of sessionsRef.current.entries()) {
+        if (session.pairId === pairId && !session.stopped) {
+          await session.resolveConflict(path, resolution);
+          break;
+        }
+      }
+
+      // Persist the resolution to IDB regardless of session state
+      await idbResolveConflict(pairId, path, resolution).catch((err) => {
+        if (import.meta.env.DEV) {
+          console.warn(`[useBDP] idbResolveConflict failed:`, err);
+        }
+      });
+
+      // Remove the resolved conflict from React state
+      setPendingConflicts((prev) => {
+        const current = prev.get(pairId) ?? [];
+        const updated = current.filter((c) => c.path !== path);
+        return new Map(prev).set(pairId, updated);
+      });
+    },
+    [],
+  );
+
+  /**
+   * Re-lists vault files for a pair. Call this after a sync completes or
+   * after the user exports/modifies files in the vault.
+   */
+  const refreshVaultFiles = useCallback(
+    async (pairId: PairId): Promise<void> => {
+      await refreshVaultFilesInternal(pairId);
+    },
+    [refreshVaultFilesInternal],
+  );
+
+  /**
+   * Updates the device's display name (shown to peers during sync).
+   */
+  const updateDeviceName = useCallback(async (name: string): Promise<void> => {
+    await setDeviceName(name);
+    const updated = await getOrCreateDevice();
+    setDevice(updated);
+  }, []);
+
+  // ── Cleanup on unmount ────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const sessions = sessionsRef.current;
+    return () => {
+      // Stop all active sessions when the hook unmounts
+      for (const session of sessions.values()) {
+        session.stop();
+      }
+      sessions.clear();
+    };
+  }, []);
+
+  // ── Stable return value ───────────────────────────────────────────────────
+
+  return useMemo(
+    () => ({
+      device,
+      pairs,
+      engineStates,
+      vaultFiles,
+      pendingConflicts,
+      initialising,
+      initError,
+      createPair,
+      deletePair,
+      triggerSync,
+      resolveConflict,
+      refreshVaultFiles,
+      updateDeviceName,
+      handleFrame,
+    }),
+    [
+      device,
+      pairs,
+      engineStates,
+      vaultFiles,
+      pendingConflicts,
+      initialising,
+      initError,
+      createPair,
+      deletePair,
+      triggerSync,
+      resolveConflict,
+      refreshVaultFiles,
+      updateDeviceName,
+      handleFrame,
+    ],
+  );
+}

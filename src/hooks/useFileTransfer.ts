@@ -117,6 +117,16 @@ export function useFileTransfer() {
     Map<string, (msg: Record<string, unknown>) => void>
   >(new Map());
 
+  /**
+   * Global BDP frame handler — set once by useBDP via registerBDPHandler().
+   * Receives the raw DataChannel message (string or ArrayBuffer) BEFORE the
+   * legacy protocol parser runs. If the handler returns true the message is
+   * a BDP frame and has been consumed; the legacy path is skipped.
+   */
+  const bdpHandlerRef = useRef<
+    ((peerId: string, raw: string | ArrayBuffer) => boolean) | null
+  >(null);
+
   const receivedFilesBackupRef = useRef<ReceivedFile[]>([]);
 
   // Sending state
@@ -304,6 +314,16 @@ export function useFileTransfer() {
   const handleMessage = useCallback(
     async (peerId: string, peerName: string, event: MessageEvent) => {
       try {
+        // ── BDP fast path ────────────────────────────────────────────────────
+        // BDP frames (both string control frames and binary chunk frames) are
+        // intercepted here before any legacy protocol parsing.  The handler
+        // returns true when it consumed the message so we skip the rest.
+        const bdpHandler = bdpHandlerRef.current;
+        if (bdpHandler) {
+          const raw = event.data as string | ArrayBuffer;
+          if (bdpHandler(peerId, raw)) return;
+        }
+
         // Handle JSON messages
         if (typeof event.data === "string") {
           const message: TransferMessage = JSON.parse(event.data);
@@ -822,6 +842,28 @@ export function useFileTransfer() {
   }, []);
 
   /**
+   * Registers a global BDP frame handler.
+   *
+   * The handler receives the raw DataChannel message (string or ArrayBuffer)
+   * and the peerId it came from. It must return true if the message was a BDP
+   * frame (consumed), false to let the legacy protocol process it normally.
+   *
+   * Called once from App.tsx after useBDP is initialised.
+   * Returns an unregister function for cleanup.
+   */
+  const registerBDPHandler = useCallback(
+    (
+      handler: (peerId: string, raw: string | ArrayBuffer) => boolean,
+    ): (() => void) => {
+      bdpHandlerRef.current = handler;
+      return () => {
+        bdpHandlerRef.current = null;
+      };
+    },
+    [],
+  );
+
+  /**
    * Register a handler for sync control messages (sync-manifest, sync-ack, sync-done)
    * arriving on the data channel for a given peer.
    * Returns an unregister function — call it in a cleanup effect.
@@ -849,6 +891,7 @@ export function useFileTransfer() {
     resetSendState,
     cleanupPeer,
     registerSyncHandler,
+    registerBDPHandler,
     formatBytes,
   };
 }

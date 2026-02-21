@@ -1,5 +1,10 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
+import {
+  handleBDPRelayRequest,
+  getBDPRelayStats,
+  configureRelay,
+} from "./bdpRelay.js";
 import type {
   SignalingMessage,
   Session,
@@ -15,6 +20,9 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",")
   : ["http://localhost:5173", "http://localhost:3000"];
+
+// Wire allowed origins into the BDP relay so it enforces CORS correctly
+configureRelay({ allowedOrigins: ALLOWED_ORIGINS });
 
 // In-memory session storage
 const sessions = new Map<string, Session>();
@@ -502,10 +510,15 @@ function handleMessage(ws: WebSocket, message: SignalingMessage) {
   }
 }
 
-// Create HTTP server for health checks
+// Create HTTP server for health checks + BDP relay
 const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
-  // Health check endpoint
+  // ── BDP Delta Relay routes (Touch Point 3) ────────────────────────────────
+  // Must be checked BEFORE the health-check handler so /bdp/* paths are caught.
+  if (handleBDPRelayRequest(req, res)) return;
+
+  // ── Health check endpoint ─────────────────────────────────────────────────
   if (req.url === "/" || req.url === "/health") {
+    const relayStats = getBDPRelayStats();
     res.writeHead(200, {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
@@ -519,6 +532,11 @@ const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
         activeSessions: sessions.size,
         environment: NODE_ENV,
         timestamp: new Date().toISOString(),
+        bdpRelay: {
+          totalPairs: relayStats.totalPairs,
+          totalEnvelopes: relayStats.totalEnvelopes,
+          oldestEnvelopeAgeMs: relayStats.oldestEnvelopeAge,
+        },
       }),
     );
     return;
