@@ -349,8 +349,17 @@ function PairCard({
         {/* Offline hint */}
         {status.kind === "offline" && (
           <p className="text-[11px] text-muted-foreground/70 bg-muted/40 rounded px-2 py-1">
-            Open Butterfly Drop on the paired device and connect to this session
-            to start syncing.
+            Open Butterfly Drop on the other device (same session or scan the
+            QR again), go to the Sync tab, and stay on it. Switch back here to
+            retry.
+          </p>
+        )}
+
+        {/* Connecting hint — greeting can take a few seconds */}
+        {status.kind === "connecting" && (
+          <p className="text-[11px] text-muted-foreground/70 bg-muted/40 rounded px-2 py-1">
+            Establishing secure connection… Ensure the other device has the app
+            open and is on the Sync tab.
           </p>
         )}
 

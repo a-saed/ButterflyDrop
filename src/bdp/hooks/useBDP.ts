@@ -154,6 +154,8 @@ export function useBDP({
   >(new Map());
   const [initialising, setInitialising] = useState(true);
   const [initError, setInitError] = useState<Error | null>(null);
+  /** Incremented on window focus when we have offline pairs — re-runs session matching */
+  const [sessionRetryKey, setSessionRetryKey] = useState(0);
 
   // ── Refs ──────────────────────────────────────────────────────────────────
   /** Active BDPSession instances, keyed by WebRTC peerId */
@@ -287,6 +289,25 @@ export function useBDP({
       void pullAllRelayDeltas();
     }
   }, [pairs, device, pullAllRelayDeltas]);
+
+  // Re-run session matching when user returns to the tab and we have offline pairs
+  // (peer may have connected while the tab was in the background)
+  useEffect(() => {
+    const onFocus = () => {
+      if (initialising || pairs.length === 0) return;
+      const pairIdsWithSession = new Set(
+        [...sessionsRef.current.values()].map((s) => s.pairId),
+      );
+      const hasPairWithoutSession = pairs.some(
+        (p) => !pairIdsWithSession.has(p.pairId),
+      );
+      if (hasPairWithoutSession) {
+        setSessionRetryKey((k) => k + 1);
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [pairs, initialising]);
 
   // ── Session lifecycle (peer connect / disconnect) ─────────────────────────
 
@@ -522,9 +543,11 @@ export function useBDP({
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readyPeers, pairs, getDataChannelForPeer, initialising]);
+  }, [readyPeers, pairs, getDataChannelForPeer, initialising, sessionRetryKey]);
   // `pairs` is in deps so that creating a pair while a peer is already
   // connected immediately triggers a session start.
+  // `sessionRetryKey` is bumped on window focus when we have offline pairs,
+  // so we re-run session matching (peer may have connected in the background).
   // `device` is read from a ref to avoid stale closures.
   // `initialising` is in deps (Bug #4 fix) so that when IDB/OPFS init
   // completes on slow devices (e.g. iPhone first visit), the effect re-runs
