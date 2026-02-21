@@ -315,6 +315,10 @@ function ShareFlow({
     setError(null);
     try {
       await onCreatePair({
+        // CRITICAL: must reuse the same pairId that was encoded in the QR code.
+        // Without this, the sender gets a different random pairId from the
+        // receiver, causing BDP_HELLO to fail immediately ("pair not found").
+        pairId: pairIdRef.current,
         folderName: result.name,
         handle: result.handle,
         useRealFS: result.useRealFS,

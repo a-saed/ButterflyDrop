@@ -398,9 +398,52 @@ export function useBDP({
         }
       });
 
-      // Clean up listener when the session stops
+      // Bug #3 fix: update pair.devices once the peer's identity is confirmed
+      // via the BDP_HELLO exchange so the pair card shows the real peer name
+      // instead of "Waiting for peer…" forever.
+      const unsubscribePeerIdentified = session.on(
+        "peerIdentified",
+        ({ deviceId, deviceName, publicKeyB64 }) => {
+          const pairId = matchingPair!.pairId;
+
+          setPairs((prev) => {
+            const idx = prev.findIndex((p) => p.pairId === pairId);
+            if (idx === -1) return prev;
+
+            const existing = prev[idx]!;
+            // Skip if this device is already in the list
+            const alreadyKnown = existing.devices.some(
+              (d) => d.deviceId === deviceId,
+            );
+            if (alreadyKnown) return prev;
+
+            const updated: typeof existing = {
+              ...existing,
+              devices: [
+                ...existing.devices,
+                {
+                  deviceId,
+                  deviceName,
+                  publicKeyB64,
+                  lastSeenAt: Date.now(),
+                },
+              ],
+            };
+
+            // Persist asynchronously — don't block state update
+            void putPair(updated);
+
+            const next = [...prev];
+            next[idx] = updated;
+            return next;
+          });
+        },
+      );
+
+      // Clean up listeners when the session stops
       session.on("stopped", () => {
         unsubscribeState();
+        unsubscribePeerIdentified();
       });
 
       sessionsRef.current.set(peerId, session);

@@ -105,6 +105,12 @@ type SessionEvents = {
   stateChange: BDPEngineState;
   frame: BDPFrame;
   stopped: void;
+  /** Fired once when the peer's identity is confirmed via BDP_HELLO exchange */
+  peerIdentified: {
+    deviceId: DeviceId;
+    deviceName: string;
+    publicKeyB64: string;
+  };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,8 +179,18 @@ export class BDPSession {
 
   // Ping/pong
   private _pingInterval: ReturnType<typeof setInterval> | null = null;
-  /** @internal Reserved for future round-trip latency measurement */
+  /** @internal Kept for future round-trip latency measurement */
   private readonly _lastPingNonceRef = { value: null as string | null };
+
+  // ── HELLO retry / echo-back (Bug #2 fix) ─────────────────────────────────
+  /** Periodic retry timer — keeps re-sending HELLO until peer responds */
+  private _helloRetryTimer: ReturnType<typeof setInterval> | null = null;
+  /** Set to true the moment we successfully process a BDP_HELLO from the peer */
+  private _helloReceived = false;
+  /** How often to resend HELLO while waiting for the peer (ms) */
+  private static readonly HELLO_RETRY_MS = 5_000;
+  /** Give up after this many retries (~1 minute) */
+  private static readonly HELLO_MAX_RETRIES = 12;
 
   // Simple event emitter — keyed by event name, value is an array of handlers
   // We use unknown[] here and cast at call sites to avoid the complex generic
@@ -216,6 +232,7 @@ export class BDPSession {
 
     this._setState({ phase: "greeting" });
     await this._sendHello();
+    this._startHelloRetry();
   }
 
   /**
@@ -226,6 +243,7 @@ export class BDPSession {
     if (this._stopped) return;
     this._stopped = true;
     this._clearPingInterval();
+    this._clearHelloRetry();
     this._detachDataChannelListeners();
     this._emit("stopped", undefined as void);
   }
@@ -414,6 +432,65 @@ export class BDPSession {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Internal: HELLO retry (Bug #2 fix)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Starts a periodic timer that re-sends BDP_HELLO every HELLO_RETRY_MS
+   * until the peer acknowledges with their own BDP_HELLO (_helloReceived=true)
+   * or we exceed HELLO_MAX_RETRIES.
+   *
+   * Why this is necessary:
+   *   The sender creates a BDPSession and fires BDP_HELLO the moment the
+   *   DataChannel opens. The receiver may not have created their BDPSession
+   *   yet (they're still picking a folder in the UI). The initial HELLO is
+   *   discarded on the receiver side — this retry ensures they eventually
+   *   get one once their session is ready.
+   *
+   * The retry continues even after we move past the greeting phase because
+   * we may have already processed the peer's HELLO (and advanced) without
+   * them having received ours yet. The timer stops the moment _helloReceived
+   * is set to true (i.e. we got a HELLO back from the peer).
+   */
+  private _startHelloRetry(): void {
+    let retries = 0;
+    this._helloRetryTimer = setInterval(() => {
+      if (this._stopped || this._helloReceived) {
+        this._clearHelloRetry();
+        return;
+      }
+      retries++;
+      if (retries >= BDPSession.HELLO_MAX_RETRIES) {
+        this._clearHelloRetry();
+        // Only escalate to fatal error if we never heard back at all
+        if (!this._helloReceived && this._state.phase === "greeting") {
+          this._setFatalError(
+            "TIMEOUT",
+            "Peer did not respond to greeting — make sure both devices have the app open and are connected to the same session.",
+            false,
+          );
+        }
+        return;
+      }
+
+      if (import.meta.env.DEV) {
+        console.log(
+          `[BDP] HELLO retry ${retries}/${BDPSession.HELLO_MAX_RETRIES} for pair ${this._opts.pairId}`,
+        );
+      }
+
+      void this._sendHello();
+    }, BDPSession.HELLO_RETRY_MS);
+  }
+
+  private _clearHelloRetry(): void {
+    if (this._helloRetryTimer !== null) {
+      clearInterval(this._helloRetryTimer);
+      this._helloRetryTimer = null;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Internal: frame dispatch router
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -521,9 +598,22 @@ export class BDPSession {
   private async _handleHello(frame: BDPHelloFrame): Promise<void> {
     if (this._state.phase !== "greeting") return;
 
+    // ── Bug #2 fix: mark that we received a HELLO so the retry timer stops ─
+    this._helloReceived = true;
+    this._clearHelloRetry();
+
     // Store peer's public key for future ECDH shared key derivation
     this._peerPublicKeyB64 = frame.payload.publicKeyB64;
     void this._peerPublicKeyB64; // will be used when relay encryption is wired in
+
+    // ── Bug #3 fix: surface peer identity to the UI layer ─────────────────
+    // Emit peerIdentified so useBDP can update pair.devices with the real
+    // peer device name (instead of showing "Waiting for peer…" forever).
+    this._emit("peerIdentified", {
+      deviceId: frame.fromDeviceId,
+      deviceName: frame.payload.deviceName,
+      publicKeyB64: frame.payload.publicKeyB64,
+    });
 
     // Find the pair info for our shared pairId
     const peerPairInfo = frame.payload.pairs.find(
@@ -539,6 +629,14 @@ export class BDPSession {
       );
       return;
     }
+
+    // ── Bug #2 fix: echo our HELLO back ───────────────────────────────────
+    // If the peer started their session AFTER we already sent our first HELLO
+    // (timing race: they were still picking a folder), they never received it.
+    // Sending again here guarantees they get at least one HELLO from us, since
+    // we know their session is now alive (they just sent us one).
+    // If we're both in greeting simultaneously this is a harmless duplicate.
+    await this._sendHello();
 
     // Ensure our index root knows our deviceId
     await setIndexRootDeviceId(this._opts.pairId, this._opts.myDeviceId);
