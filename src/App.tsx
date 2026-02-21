@@ -450,7 +450,7 @@ function AppContent() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen relative" {...getRootProps()}>
+    <div className="h-[100dvh] overflow-hidden relative" {...getRootProps()}>
       <input {...getInputProps()} />
 
       {showWarmupOverlay && (
@@ -474,69 +474,76 @@ function AppContent() {
         </div>
       )}
 
-      <div
-        className="relative min-h-screen flex flex-col"
-        style={{ zIndex: 10 }}
-      >
+      <div className="relative h-full flex flex-col" style={{ zIndex: 10 }}>
         {/* ── Header ──────────────────────────────────────────────────────── */}
-        <header className="shrink-0 border-b border-border/40 bg-background/80 backdrop-blur-md">
-          <div className="flex items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3">
-            {/* Logo — icon only on xs, icon+name on sm+ */}
-            <div className="flex items-center gap-1.5 shrink-0 mr-1">
-              <ButterflyLogo />
-              <span className="hidden sm:block text-sm font-semibold leading-none">
+        <header className="shrink-0 bg-background/85 backdrop-blur-xl border-b border-border/30">
+          <div className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2.5">
+            {/* Logo */}
+            <div className="flex items-center gap-2 shrink-0">
+              <ButterflyLogo size={28} />
+              <span className="hidden sm:block text-sm font-bold tracking-tight leading-none bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">
                 Butterfly Drop
               </span>
             </div>
 
-            {/* Tab toggle — centered, takes available space */}
+            {/* Tab toggle — centered */}
             <div className="flex-1 flex justify-center">
-              <div className="flex items-center bg-muted/60 rounded-xl p-1 border border-border/40 gap-0.5">
+              <div className="relative flex items-center bg-muted/50 rounded-2xl p-1 gap-0.5">
+                {/* Sliding highlight */}
+                <div
+                  className={cn(
+                    "absolute top-1 bottom-1 rounded-xl transition-all duration-200 ease-out",
+                    "bg-background shadow-sm border border-border/30",
+                    activeTab === "send"
+                      ? "left-1 right-[calc(50%+1px)]"
+                      : "left-[calc(50%+1px)] right-1",
+                  )}
+                />
                 <button
                   onClick={() => setActiveTab("send")}
                   className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150",
+                    "relative z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors duration-150 min-w-[60px] justify-center",
                     activeTab === "send"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
+                      ? "text-foreground"
+                      : "text-muted-foreground hover:text-foreground/80",
                   )}
                 >
-                  <Send className="h-3.5 w-3.5" />
+                  <Send className="h-3 w-3" />
                   <span>Send</span>
                 </button>
                 <button
                   onClick={() => setActiveTab("sync")}
                   className={cn(
-                    "relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150",
+                    "relative z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors duration-150 min-w-[60px] justify-center",
                     activeTab === "sync"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
+                      ? "text-foreground"
+                      : "text-muted-foreground hover:text-foreground/80",
                   )}
                 >
                   <RefreshCw
                     className={cn(
-                      "h-3.5 w-3.5",
+                      "h-3 w-3",
                       bdpSyncingCount > 0 && "animate-spin",
                     )}
                   />
                   <span>Sync</span>
                   {bdpConflictCount > 0 && (
-                    <span className="absolute -top-1 -right-1 h-4 w-4 flex items-center justify-center rounded-full bg-orange-500 text-[9px] text-white font-bold">
+                    <span className="absolute -top-0.5 -right-0.5 h-3.5 w-3.5 flex items-center justify-center rounded-full bg-orange-500 text-[8px] text-white font-bold">
                       {bdpConflictCount}
                     </span>
                   )}
                   {bdpConflictCount === 0 && bdpSyncingCount > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                    <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
                     </span>
                   )}
                 </button>
               </div>
             </div>
 
-            {/* Right actions — always single row */}
-            <div className="flex items-center gap-1 shrink-0">
+            {/* Right actions */}
+            <div className="flex items-center gap-0.5 shrink-0">
               {shareableUrl && <ShareLink url={shareableUrl} />}
               <QRScanner onScanSuccess={handleQRScanSuccess} />
               <ConnectionStatus
@@ -564,7 +571,7 @@ function AppContent() {
 
         {/* ── Tab: SEND FILES ─────────────────────────────────────────────── */}
         {activeTab === "send" && (
-          <main className="flex-1 relative overflow-hidden">
+          <main className="flex-1 relative overflow-hidden min-h-0">
             {/* Peer Network — full-screen spatial layout */}
             <div className="absolute inset-0">
               <PeerNetwork
@@ -578,7 +585,12 @@ function AppContent() {
             </div>
 
             {/* Bottom Panel */}
-            <div className="absolute bottom-0 left-0 right-0 px-3 pb-4 sm:px-5 sm:pb-5">
+            <div
+              className="absolute bottom-0 left-0 right-0 px-3 sm:px-5"
+              style={{
+                paddingBottom: "max(1rem, env(safe-area-inset-bottom, 1rem))",
+              }}
+            >
               <div className="max-w-lg mx-auto space-y-2">
                 {/* Transfer progress */}
                 <SendProgressPanel
@@ -705,7 +717,7 @@ function AppContent() {
 
         {/* ── Tab: SYNC PAIRS ─────────────────────────────────────────────── */}
         {activeTab === "sync" && (
-          <main className="flex-1 overflow-y-auto">
+          <main className="flex-1 overflow-y-auto min-h-0">
             <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 space-y-4">
               {bdp.initError && (
                 <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-900/10 px-3 py-2.5">

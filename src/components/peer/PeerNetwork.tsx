@@ -82,66 +82,17 @@ function RadarEmptyState({ shareableUrl }: { shareableUrl?: string }) {
   }, [shareableUrl]);
 
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center select-none pb-40 sm:pb-48">
-      {/* ── Radar rings ── */}
-      <div className="relative flex items-center justify-center mb-8">
-        {/* Outermost ring */}
-        <span
-          className="absolute rounded-full border border-primary/10 animate-ping"
-          style={{
-            width: 200,
-            height: 200,
-            animationDuration: "3s",
-            animationDelay: "0s",
-          }}
-        />
-        {/* Mid ring */}
-        <span
-          className="absolute rounded-full border border-primary/15 animate-ping"
-          style={{
-            width: 148,
-            height: 148,
-            animationDuration: "3s",
-            animationDelay: "0.6s",
-          }}
-        />
-        {/* Inner ring */}
-        <span
-          className="absolute rounded-full border border-primary/25 animate-ping"
-          style={{
-            width: 100,
-            height: 100,
-            animationDuration: "3s",
-            animationDelay: "1.2s",
-          }}
-        />
+    <div className="absolute inset-0 flex flex-col items-center justify-center select-none pb-32 sm:pb-40">
+      {/* ── Center disc — no competing rings, ambient bg already pulses ── */}
+      <div className="relative flex items-center justify-center mb-6">
+        {/* Soft glow behind the disc */}
+        <div className="absolute w-24 h-24 rounded-full bg-primary/10 blur-2xl" />
 
-        {/* Static background rings (always visible, subtle) */}
-        <span
-          className="absolute rounded-full border border-primary/8"
-          style={{ width: 180, height: 180 }}
-        />
-        <span
-          className="absolute rounded-full border border-primary/12"
-          style={{ width: 120, height: 120 }}
-        />
-        <span
-          className="absolute rounded-full border border-primary/18"
-          style={{ width: 80, height: 80 }}
-        />
-
-        {/* Center glow disc */}
-        <div
-          className="absolute rounded-full bg-primary/5 blur-xl"
-          style={{ width: 96, height: 96 }}
-        />
-
-        {/* Center icon */}
-        <div className="relative z-10 flex items-center justify-center w-14 h-14 rounded-full bg-background border-2 border-primary/30 shadow-lg shadow-primary/10">
-          {/* Butterfly SVG */}
+        {/* Glassy disc */}
+        <div className="relative z-10 flex items-center justify-center w-16 h-16 rounded-full bg-background/80 backdrop-blur-sm border border-primary/25 shadow-xl shadow-primary/10">
           <svg
             viewBox="0 0 32 32"
-            className="w-7 h-7 text-primary"
+            className="w-8 h-8 text-primary"
             fill="currentColor"
           >
             <path
@@ -177,8 +128,8 @@ function RadarEmptyState({ shareableUrl }: { shareableUrl?: string }) {
           <button
             onClick={handleCopy}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold
-                       bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20
-                       transition-all active:scale-95"
+                       bg-background/80 backdrop-blur-sm hover:bg-primary/10 text-primary
+                       border border-primary/25 transition-all duration-150 active:scale-95"
           >
             {copied ? (
               <Check className="w-3.5 h-3.5" />
@@ -192,8 +143,8 @@ function RadarEmptyState({ shareableUrl }: { shareableUrl?: string }) {
             <DialogTrigger asChild>
               <button
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold
-                           bg-muted hover:bg-muted/80 text-muted-foreground border border-border/50
-                           transition-all active:scale-95"
+                           bg-background/80 backdrop-blur-sm hover:bg-muted text-muted-foreground
+                           border border-border/50 transition-all duration-150 active:scale-95"
               >
                 <QrCode className="w-3.5 h-3.5" />
                 QR code
