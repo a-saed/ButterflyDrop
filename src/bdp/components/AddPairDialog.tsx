@@ -466,6 +466,11 @@ function JoinFlow({
     setStep("connecting");
   }, [decoded, joinSession]);
 
+  // Stable key so the effect only re-runs when the actual peer set changes.
+  // (readyPeers from context is a new array every render, which would otherwise
+  // reset the 2s fallback every time and "Connecting" would never advance.)
+  const readyPeersKey = [...readyPeers].sort().join(",");
+
   // Once in "connecting", watch for the sender to appear in readyPeers
   // Fall back to a timeout so the UI doesn't stall if the peer is already connected
   useEffect(() => {
@@ -482,7 +487,9 @@ function JoinFlow({
     // (peer may already be in readyPeers from a prior connection)
     const timer = setTimeout(() => setStep("pick-folder"), 2000);
     return () => clearTimeout(timer);
-  }, [step, readyPeers, prevPeersRef]);
+    // readyPeers omitted intentionally: we depend on readyPeersKey so the 2s timer
+    // isn't reset on every parent re-render (context passes a new array ref each time).
+  }, [step, readyPeersKey, prevPeersRef]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleInputChange = useCallback(
     (e: ChangeEvent<HTMLTextAreaElement>) => {

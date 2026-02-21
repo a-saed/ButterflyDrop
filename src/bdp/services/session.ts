@@ -78,10 +78,8 @@ import {
 import {
   encodeChunkFrame,
   encodeControlFrame,
-  isBDPMessage,
   makeHeader,
   makeTransferId,
-  tryDecodeFrame,
 } from "./protocol";
 import { hasChunk, readChunk, writeChunk, writeFileToVault } from "./opfsVault";
 import { computeSyncPlan } from "./syncPlanner";
@@ -339,17 +337,12 @@ export class BDPSession {
   // ─────────────────────────────────────────────────────────────────────────
   // Internal: DataChannel I/O
   // ─────────────────────────────────────────────────────────────────────────
-
-  private _onMessage = (event: MessageEvent<string | ArrayBuffer>): void => {
-    const raw = event.data;
-
-    if (!isBDPMessage(raw)) return;
-
-    const result = tryDecodeFrame(raw);
-    if (!result) return;
-
-    this.handleFrame(result.frame, result.chunkData);
-  };
+  //
+  // Message handling: BDP frames are delivered by the host (useBDP) via
+  // handleFrame(peerId, raw), which is invoked from the single DataChannel
+  // onmessage handler in useFileTransfer. We do NOT add a "message" listener
+  // here — doing so would cause every frame to be processed twice (once by
+  // the app path, once by this listener) and break the state machine.
 
   private _onClose = (): void => {
     if (!this._stopped) {
@@ -364,13 +357,11 @@ export class BDPSession {
   };
 
   private _attachDataChannelListeners(): void {
-    this._opts.dataChannel.addEventListener("message", this._onMessage);
     this._opts.dataChannel.addEventListener("close", this._onClose);
     this._opts.dataChannel.addEventListener("error", this._onError);
   }
 
   private _detachDataChannelListeners(): void {
-    this._opts.dataChannel.removeEventListener("message", this._onMessage);
     this._opts.dataChannel.removeEventListener("close", this._onClose);
     this._opts.dataChannel.removeEventListener("error", this._onError);
   }
