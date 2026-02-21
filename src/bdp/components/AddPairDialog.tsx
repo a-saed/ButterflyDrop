@@ -1,33 +1,34 @@
 /**
- * BDP — Add Pair Dialog (Phase F2)
+ * BDP — Add Pair Dialog (Phase F2) — Redesigned
  *
- * Two-mode dialog for establishing a new sync pair:
+ * Two-mode flow for establishing a new sync pair:
  *
- *   Share mode (sender):
- *     1. Generate a pairId + encode QR payload (pairId + publicKey)
+ *   Share mode (this device shows a QR / link):
+ *     1. Generate pairId + encode QR payload
  *     2. Display QR code + copyable link
- *     3. Poll readyPeers — when the peer appears, complete setup
- *     4. Prompt user to pick a local folder
- *     5. Save the pair
+ *     3. Detect when a peer joins readyPeers → advance
+ *     4. User picks local folder → pair saved
  *
- *   Join mode (receiver):
- *     1. Paste the share link or scan QR
- *     2. Decode pairId + peer public key
- *     3. Join the signaling session
- *     4. Pick a local folder
- *     5. Save the pair with the peer's device info
+ *   Join mode (this device received a link / scanned a QR):
+ *     1. If ?bdp= is in URL → auto-fill and skip paste step
+ *     2. Decode pairId + peer info from payload
+ *     3. Call joinSession(decoded.sessionId) to enter the WebRTC room
+ *     4. User picks local folder → pair saved
  *
- * The QR payload is a base64-encoded JSON object:
- *   { pairId: string; publicKeyB64: string; sessionId: string; deviceName: string }
- *
- * Dependencies: useBDP hook, react-qr-code (or inline SVG QR), shadcn/ui
+ * UI notes:
+ *   - Full-screen on mobile (rounded-none), centered modal on ≥sm
+ *   - Large scannable QR code — never overflows
+ *   - Step dots show progress within a flow
+ *   - Butterfly-themed success state
  */
 
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   useState,
   useCallback,
   useEffect,
   useRef,
+  useMemo,
   type ChangeEvent,
 } from "react";
 import QRCode from "react-qr-code";
@@ -36,24 +37,19 @@ import {
   Copy,
   Check,
   Folder,
-  Share2,
   QrCode,
-  Link,
-  ChevronRight,
+  Link2,
   Loader2,
   CheckCircle2,
-  X,
+  ArrowLeft,
+  Smartphone,
+  Monitor,
+  RefreshCw,
+  Wifi,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogPortal, DialogOverlay } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 import type { BDPDevice, DeviceId, PairId, SyncPair } from "@/types/bdp";
@@ -63,8 +59,7 @@ import type { CreatePairOptions } from "@/bdp/hooks/useBDP";
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The payload encoded inside the QR / share link */
-interface QRPayload {
+export interface QRPayload {
   pairId: string;
   publicKeyB64: string;
   sessionId: string;
@@ -72,31 +67,36 @@ interface QRPayload {
 }
 
 type DialogMode = "pick" | "share" | "join";
-type ShareStep = "qr" | "waiting" | "pick-folder" | "done";
+type ShareStep = "qr" | "peer-connected" | "pick-folder" | "done";
 type JoinStep = "paste" | "connecting" | "pick-folder" | "done";
 
 export interface AddPairDialogProps {
   open: boolean;
   onOpenChange(open: boolean): void;
-  /** Local device — used to encode publicKey in QR payload */
   device: BDPDevice | null;
-  /** From useWebRTCContext — used to detect when the peer joins */
   readyPeers: string[];
-  /** Current WebRTC session ID — included in QR so receiver can join */
   sessionId: string;
-  /** Called when the user finishes setup and we should create the pair */
+  /** Joins the WebRTC signaling room so the two devices can see each other */
+  joinSession(sessionId: string): void;
   onCreatePair(options: CreatePairOptions): Promise<SyncPair>;
+  /** Pre-decoded payload from ?bdp= URL param — triggers auto-join mode */
+  autoJoinPayload?: QRPayload | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
+// Payload helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function encodeQRPayload(payload: QRPayload): string {
+// These are exported as plain functions (not components) — kept here for
+// co-location with the QRPayload type. Fast Refresh only warns on mixed files
+// but these are purely used by App.tsx at import time, not rendered.
+// eslint-disable-next-line react-refresh/only-export-components
+export function encodeQRPayload(payload: QRPayload): string {
   return btoa(JSON.stringify(payload));
 }
 
-function decodeQRPayload(encoded: string): QRPayload | null {
+// eslint-disable-next-line react-refresh/only-export-components
+export function decodeQRPayload(encoded: string): QRPayload | null {
   try {
     const decoded = JSON.parse(atob(encoded.trim())) as unknown;
     if (
@@ -104,7 +104,8 @@ function decodeQRPayload(encoded: string): QRPayload | null {
       typeof decoded === "object" &&
       "pairId" in decoded &&
       "publicKeyB64" in decoded &&
-      "sessionId" in decoded
+      "sessionId" in decoded &&
+      "deviceName" in decoded
     ) {
       return decoded as QRPayload;
     }
@@ -114,10 +115,9 @@ function decodeQRPayload(encoded: string): QRPayload | null {
   }
 }
 
-/** Extracts the base64 payload from a full share URL or raw base64 string */
-function extractPayload(input: string): string {
+// eslint-disable-next-line react-refresh/only-export-components
+export function extractBDPParam(input: string): string {
   const trimmed = input.trim();
-  // Could be a full URL like https://example.com/?bdp=<base64>
   try {
     const url = new URL(trimmed);
     const param = url.searchParams.get("bdp");
@@ -133,12 +133,15 @@ function buildShareUrl(payload: string): string {
   return `${base}?bdp=${encodeURIComponent(payload)}`;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Folder picker
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function pickFolder(): Promise<{
   name: string;
   handle: FileSystemDirectoryHandle | null;
   useRealFS: boolean;
 } | null> {
-  // Tier 1: File System Access API (Chrome/Edge)
   if ("showDirectoryPicker" in window) {
     try {
       const handle = await (
@@ -150,15 +153,11 @@ async function pickFolder(): Promise<{
       ).showDirectoryPicker({ mode: "readwrite" });
       return { name: handle.name, handle, useRealFS: true };
     } catch (err) {
-      // User cancelled
       if (err instanceof DOMException && err.name === "AbortError") return null;
-      // Permission denied or other error — fall through to OPFS-only
     }
   }
-
-  // Tier 0: OPFS-only — prompt for a name
   const name = prompt(
-    "Enter a name for this sync folder (files will be stored in your browser's private storage):",
+    "Enter a name for this sync folder (files will live in your browser's private storage):",
     "My Sync Folder",
   );
   if (!name) return null;
@@ -166,8 +165,28 @@ async function pickFolder(): Promise<{
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sub-components
+// Tiny reusable atoms
 // ─────────────────────────────────────────────────────────────────────────────
+
+function StepDots({ total, current }: { total: number; current: number }) {
+  return (
+    <div className="flex items-center justify-center gap-1.5 py-1">
+      {Array.from({ length: total }).map((_, i) => (
+        <span
+          key={i}
+          className={cn(
+            "rounded-full transition-all duration-300",
+            i < current
+              ? "bg-primary w-4 h-1.5"
+              : i === current
+                ? "bg-primary w-4 h-1.5 opacity-100"
+                : "bg-muted w-1.5 h-1.5",
+          )}
+        />
+      ))}
+    </div>
+  );
+}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -175,19 +194,16 @@ function CopyButton({ text }: { text: string }) {
   const handleCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Clipboard API unavailable — fallback
       const el = document.createElement("textarea");
       el.value = text;
       document.body.appendChild(el);
       el.select();
       document.execCommand("copy");
       document.body.removeChild(el);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
     }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }, [text]);
 
   return (
@@ -195,15 +211,45 @@ function CopyButton({ text }: { text: string }) {
       type="button"
       onClick={handleCopy}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+        "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium shrink-0",
+        "transition-all duration-200",
         copied
-          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-          : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground",
+          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
+          : "bg-muted hover:bg-muted/70 text-muted-foreground hover:text-foreground",
       )}
     >
       {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
       {copied ? "Copied!" : "Copy"}
     </button>
+  );
+}
+
+function PulsingDot() {
+  return (
+    <span className="relative flex size-2.5">
+      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+      <span className="relative inline-flex rounded-full size-2.5 bg-amber-500" />
+    </span>
+  );
+}
+
+function SuccessView({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center gap-4 py-10">
+      {/* Butterfly-inspired success icon */}
+      <div className="relative flex items-center justify-center">
+        <div className="absolute size-20 rounded-full bg-emerald-500/10 animate-ping" />
+        <div className="relative flex items-center justify-center size-16 rounded-full bg-emerald-100 dark:bg-emerald-900/40">
+          <CheckCircle2 className="size-8 text-emerald-600 dark:text-emerald-400" />
+        </div>
+      </div>
+      <div className="text-center space-y-1.5">
+        <p className="font-semibold text-base">{message}</p>
+        <p className="text-sm text-muted-foreground">
+          Syncing will begin when both devices are online.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -229,50 +275,52 @@ function ShareFlow({
   onDone,
 }: ShareFlowProps) {
   const [step, setStep] = useState<ShareStep>("qr");
-
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [newPeerName, setNewPeerName] = useState<string | null>(null);
 
-  // Generate a stable pairId for this dialog session
+  // Stable pairId for this dialog session
   const pairIdRef = useRef<PairId>(nanoid(32) as PairId);
 
-  const qrPayload = encodeQRPayload({
-    pairId: pairIdRef.current,
-    publicKeyB64: device.publicKeyB64,
-    sessionId,
-    deviceName: device.deviceName,
-  });
-  const shareUrl = buildShareUrl(qrPayload);
+  const qrEncoded = useMemo(
+    () =>
+      encodeQRPayload({
+        pairId: pairIdRef.current,
+        publicKeyB64: device.publicKeyB64,
+        sessionId,
+        deviceName: device.deviceName,
+      }),
+    [device.publicKeyB64, device.deviceName, sessionId],
+  );
 
-  // Detect when a new peer joins
+  const shareUrl = useMemo(() => buildShareUrl(qrEncoded), [qrEncoded]);
+
+  // Detect new peer joining
   useEffect(() => {
-    if (step !== "qr" && step !== "waiting") return;
-
+    if (step !== "qr") return;
     const prev = prevPeersRef.current ?? [];
     const newPeers = readyPeers.filter((id) => !prev.includes(id));
-
     if (newPeers.length > 0) {
-      setStep("pick-folder");
+      // Try to get a friendly peer name from the first new peer
+      setNewPeerName(null);
+      setStep("peer-connected");
     }
   }, [readyPeers, step, prevPeersRef]);
 
   const handlePickFolder = useCallback(async () => {
     const result = await pickFolder();
-    if (!result) return; // user cancelled
+    if (!result) return;
 
     setCreating(true);
     setError(null);
-
     try {
       await onCreatePair({
         folderName: result.name,
         handle: result.handle,
         useRealFS: result.useRealFS,
-        // Note: peerInfo will be completed when the peer sends its BDP_HELLO
-        // with its deviceId and publicKey — the session.ts handles that
       });
       setStep("done");
-      setTimeout(onDone, 1500);
+      setTimeout(onDone, 1800);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -281,32 +329,36 @@ function ShareFlow({
   }, [onCreatePair, onDone]);
 
   if (step === "done") {
-    return (
-      <div className="flex flex-col items-center gap-3 py-8">
-        <CheckCircle2 className="size-12 text-emerald-500" />
-        <p className="text-sm font-medium">Sync pair created!</p>
-        <p className="text-xs text-muted-foreground">
-          Your folders are now linked. Syncing will begin shortly.
-        </p>
-      </div>
-    );
+    return <SuccessView message="Sync pair created!" />;
   }
 
-  if (step === "pick-folder") {
+  if (step === "peer-connected") {
     return (
-      <div className="flex flex-col items-center gap-4 py-4">
-        <div className="flex items-center justify-center size-14 rounded-2xl bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600">
-          <CheckCircle2 className="size-7" />
-        </div>
-        <div className="text-center">
-          <p className="text-sm font-semibold">Peer connected!</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Now choose which local folder to sync.
-          </p>
+      <div className="flex flex-col items-center gap-6 py-6 px-2">
+        <StepDots total={3} current={1} />
+
+        {/* Connected indicator */}
+        <div className="flex flex-col items-center gap-3">
+          <div className="relative">
+            <div className="flex items-center justify-center size-16 rounded-full bg-emerald-100 dark:bg-emerald-900/30">
+              <Wifi className="size-7 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <span className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-emerald-500">
+              <Check className="size-2.5 text-white" />
+            </span>
+          </div>
+          <div className="text-center">
+            <p className="font-semibold text-base">
+              {newPeerName ? `${newPeerName} connected!` : "Device connected!"}
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Now choose which local folder to sync.
+            </p>
+          </div>
         </div>
 
         {error && (
-          <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded px-3 py-2 text-center">
+          <p className="w-full text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg px-3 py-2 text-center">
             {error}
           </p>
         )}
@@ -314,7 +366,8 @@ function ShareFlow({
         <Button
           onClick={handlePickFolder}
           disabled={creating}
-          className="gap-2"
+          size="lg"
+          className="w-full gap-2 rounded-xl"
         >
           {creating ? (
             <Loader2 className="size-4 animate-spin" />
@@ -327,34 +380,41 @@ function ShareFlow({
     );
   }
 
-  // QR / waiting step
+  // QR step
   return (
-    <div className="flex flex-col gap-4">
-      {/* QR Code */}
+    <div className="flex flex-col gap-5">
+      <StepDots total={3} current={0} />
+
+      {/* QR Code — always square, always fits */}
       <div className="flex justify-center">
-        <div className="p-3 bg-white rounded-xl shadow-sm border">
-          <QRCode value={shareUrl} size={200} level="M" />
+        <div className="p-3 bg-white rounded-2xl shadow-md border border-border/40 w-fit">
+          <QRCode
+            value={shareUrl}
+            size={Math.min(240, window.innerWidth - 112)}
+            level="M"
+            style={{ display: "block" }}
+          />
         </div>
       </div>
 
-      {/* Share link */}
+      {/* Share link row */}
       <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-medium text-muted-foreground">
+        <p className="text-xs font-medium text-muted-foreground px-0.5">
           Or share this link
-        </label>
-        <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2">
-          <Link className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="flex-1 text-xs text-muted-foreground truncate font-mono">
+        </p>
+        <div className="flex items-center gap-2 rounded-xl border bg-muted/50 px-3 py-2.5">
+          <Link2 className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="flex-1 text-xs text-muted-foreground truncate font-mono min-w-0">
             {shareUrl}
           </span>
           <CopyButton text={shareUrl} />
         </div>
       </div>
 
-      {/* Status */}
-      <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-2.5">
-        <Loader2 className="size-4 animate-spin text-muted-foreground shrink-0" />
-        <p className="text-xs text-muted-foreground">
+      {/* Waiting indicator */}
+      <div className="flex items-center gap-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 px-4 py-3">
+        <PulsingDot />
+        <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
           Waiting for the other device to scan or open the link…
         </p>
       </div>
@@ -367,31 +427,58 @@ function ShareFlow({
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface JoinFlowProps {
+  joinSession(sessionId: string): void;
+  readyPeers: string[];
+  prevPeersRef: React.RefObject<string[]>;
   onCreatePair(options: CreatePairOptions): Promise<SyncPair>;
   onDone(): void;
+  /** Pre-decoded payload from ?bdp= — skip paste step */
+  autoPayload?: QRPayload | null;
 }
 
-function JoinFlow({ onCreatePair, onDone }: JoinFlowProps) {
-  const [step, setStep] = useState<JoinStep>("paste");
+function JoinFlow({
+  joinSession,
+  readyPeers,
+  prevPeersRef,
+  onCreatePair,
+  onDone,
+  autoPayload,
+}: JoinFlowProps) {
+  const [step, setStep] = useState<JoinStep>(
+    autoPayload ? "connecting" : "paste",
+  );
   const [input, setInput] = useState("");
-  const [decoded, setDecoded] = useState<QRPayload | null>(null);
+  const [decoded, setDecoded] = useState<QRPayload | null>(autoPayload ?? null);
   const [decodeError, setDecodeError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const hasJoinedRef = useRef(false);
 
-  // Also check the URL on mount (user may have opened a share link)
+  // Auto-join the WebRTC session once we have a decoded payload
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const bdpParam = urlParams.get("bdp");
-    if (bdpParam) {
-      setInput(buildShareUrl(bdpParam));
-      const payload = decodeQRPayload(bdpParam);
-      if (payload) {
-        setDecoded(payload);
-        setStep("connecting");
-      }
+    if (!decoded || hasJoinedRef.current) return;
+    hasJoinedRef.current = true;
+    joinSession(decoded.sessionId);
+    setStep("connecting");
+  }, [decoded, joinSession]);
+
+  // Once in "connecting", watch for the sender to appear in readyPeers
+  // Fall back to a timeout so the UI doesn't stall if the peer is already connected
+  useEffect(() => {
+    if (step !== "connecting") return;
+
+    const prev = prevPeersRef.current ?? [];
+    const newPeers = readyPeers.filter((id) => !prev.includes(id));
+    if (newPeers.length > 0) {
+      setStep("pick-folder");
+      return;
     }
-  }, []);
+
+    // Fallback: proceed after 2 s even if no new peer detected yet
+    // (peer may already be in readyPeers from a prior connection)
+    const timer = setTimeout(() => setStep("pick-folder"), 2000);
+    return () => clearTimeout(timer);
+  }, [step, readyPeers, prevPeersRef]);
 
   const handleInputChange = useCallback(
     (e: ChangeEvent<HTMLTextAreaElement>) => {
@@ -401,49 +488,37 @@ function JoinFlow({ onCreatePair, onDone }: JoinFlowProps) {
       setDecoded(null);
 
       if (!val.trim()) return;
-
-      const raw = extractPayload(val);
+      const raw = extractBDPParam(val);
       const payload = decodeQRPayload(raw);
       if (payload) {
         setDecoded(payload);
       } else {
-        setDecodeError("Invalid link or QR code — paste the full share URL");
+        setDecodeError("Couldn't read this link — paste the full share URL");
       }
     },
     [],
   );
 
-  const handleConnect = useCallback(() => {
-    if (!decoded) return;
-    setStep("connecting");
-    // In a real flow we'd instruct the WebRTC layer to join the signaling
-    // session from decoded.sessionId. For now we immediately move to folder pick
-    // since the WebRTC connection happens at a higher layer.
-    setTimeout(() => setStep("pick-folder"), 800);
-  }, [decoded]);
-
   const handlePickFolder = useCallback(async () => {
     if (!decoded) return;
-
     const result = await pickFolder();
     if (!result) return;
 
     setCreating(true);
     setError(null);
-
     try {
       await onCreatePair({
         folderName: result.name,
         handle: result.handle,
         useRealFS: result.useRealFS,
         peerInfo: {
-          deviceId: decoded.pairId as DeviceId, // will be updated on BDP_HELLO
+          deviceId: decoded.pairId as DeviceId, // refined on BDP_HELLO
           deviceName: decoded.deviceName,
           publicKeyB64: decoded.publicKeyB64,
         },
       });
       setStep("done");
-      setTimeout(onDone, 1500);
+      setTimeout(onDone, 1800);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -452,42 +527,54 @@ function JoinFlow({ onCreatePair, onDone }: JoinFlowProps) {
   }, [decoded, onCreatePair, onDone]);
 
   if (step === "done") {
-    return (
-      <div className="flex flex-col items-center gap-3 py-8">
-        <CheckCircle2 className="size-12 text-emerald-500" />
-        <p className="text-sm font-medium">Joined sync pair!</p>
-        <p className="text-xs text-muted-foreground">
-          Your folders are now linked. Syncing will begin shortly.
-        </p>
-      </div>
-    );
+    return <SuccessView message="Joined sync pair!" />;
   }
 
   if (step === "connecting") {
     return (
-      <div className="flex flex-col items-center gap-4 py-6">
-        <Loader2 className="size-10 animate-spin text-primary" />
-        <p className="text-sm text-muted-foreground">Connecting to peer…</p>
+      <div className="flex flex-col items-center gap-6 py-10">
+        <StepDots total={autoPayload ? 3 : 4} current={autoPayload ? 0 : 1} />
+        <div className="flex flex-col items-center gap-3">
+          <div className="relative flex items-center justify-center size-16 rounded-full bg-primary/10">
+            <Loader2 className="size-8 text-primary animate-spin" />
+          </div>
+          <div className="text-center">
+            <p className="font-semibold">Connecting to device…</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {decoded?.deviceName
+                ? `Looking for ${decoded.deviceName}`
+                : "Joining the sync session"}
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (step === "pick-folder") {
     return (
-      <div className="flex flex-col items-center gap-4 py-4">
-        <div className="flex items-center justify-center size-14 rounded-2xl bg-primary/10 text-primary">
-          <Folder className="size-7" />
-        </div>
-        <div className="text-center">
-          <p className="text-sm font-semibold">Choose a local folder</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Syncing with{" "}
-            <span className="font-medium">{decoded?.deviceName ?? "peer"}</span>
-          </p>
+      <div className="flex flex-col items-center gap-6 py-6 px-2">
+        <StepDots total={autoPayload ? 3 : 4} current={autoPayload ? 1 : 2} />
+
+        <div className="flex flex-col items-center gap-3">
+          <div className="flex items-center justify-center size-16 rounded-full bg-primary/10">
+            <Folder className="size-7 text-primary" />
+          </div>
+          <div className="text-center">
+            <p className="font-semibold text-base">Choose a folder to sync</p>
+            {decoded?.deviceName && (
+              <p className="text-sm text-muted-foreground mt-1">
+                Pairing with{" "}
+                <span className="font-medium text-foreground">
+                  {decoded.deviceName}
+                </span>
+              </p>
+            )}
+          </div>
         </div>
 
         {error && (
-          <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded px-3 py-2 text-center">
+          <p className="w-full text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg px-3 py-2 text-center">
             {error}
           </p>
         )}
@@ -495,7 +582,8 @@ function JoinFlow({ onCreatePair, onDone }: JoinFlowProps) {
         <Button
           onClick={handlePickFolder}
           disabled={creating}
-          className="gap-2"
+          size="lg"
+          className="w-full gap-2 rounded-xl"
         >
           {creating ? (
             <Loader2 className="size-4 animate-spin" />
@@ -510,45 +598,55 @@ function JoinFlow({ onCreatePair, onDone }: JoinFlowProps) {
 
   // Paste step
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1.5">
-        <label
-          htmlFor="bdp-join-input"
-          className="text-xs font-medium text-muted-foreground"
-        >
-          Paste the share link or QR code text
-        </label>
+    <div className="flex flex-col gap-5">
+      <StepDots total={4} current={0} />
+
+      <div className="flex flex-col gap-2">
+        <p className="text-xs font-medium text-muted-foreground">
+          Paste the share link from the other device
+        </p>
         <textarea
-          id="bdp-join-input"
           rows={3}
           value={input}
           onChange={handleInputChange}
-          placeholder="https://…?bdp=… or paste the raw code"
+          placeholder="https://butterfly-drop.vercel.app/?bdp=…"
           className={cn(
-            "w-full rounded-lg border bg-muted/40 px-3 py-2 text-xs font-mono resize-none",
-            "placeholder:text-muted-foreground/50",
+            "w-full rounded-xl border bg-muted/40 px-3.5 py-2.5 text-sm font-mono resize-none leading-relaxed",
+            "placeholder:text-muted-foreground/40",
             "focus:outline-none focus:ring-2 focus:ring-ring",
-            decodeError && "border-red-400 focus:ring-red-400/30",
-            decoded && "border-emerald-400 focus:ring-emerald-400/30",
+            "transition-colors",
+            decodeError &&
+              "border-red-400 focus:ring-red-300 dark:border-red-700",
+            decoded &&
+              "border-emerald-400 focus:ring-emerald-300 dark:border-emerald-700",
           )}
+          autoFocus
         />
+
         {decodeError && (
-          <p className="text-[11px] text-red-600 dark:text-red-400">
+          <p className="text-[11px] text-red-600 dark:text-red-400 flex items-center gap-1 px-0.5">
             {decodeError}
           </p>
         )}
         {decoded && (
-          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-            <Check className="size-3" />
-            Valid link from{" "}
-            <span className="font-medium">{decoded.deviceName}</span>
+          <p className="text-[11px] text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5 px-0.5 font-medium">
+            <Check className="size-3 shrink-0" />
+            Link from{" "}
+            <span className="text-emerald-800 dark:text-emerald-300">
+              {decoded.deviceName}
+            </span>
           </p>
         )}
       </div>
 
-      <Button onClick={handleConnect} disabled={!decoded} className="gap-2">
-        <ChevronRight className="size-4" />
-        Continue
+      <Button
+        onClick={() => decoded && setStep("connecting")}
+        disabled={!decoded}
+        size="lg"
+        className="w-full rounded-xl gap-2"
+      >
+        <Wifi className="size-4" />
+        Connect & Sync
       </Button>
     </div>
   );
@@ -560,47 +658,114 @@ function JoinFlow({ onCreatePair, onDone }: JoinFlowProps) {
 
 function ModePicker({ onPick }: { onPick(mode: "share" | "join"): void }) {
   return (
-    <div className="grid grid-cols-2 gap-3 py-2">
-      <button
-        type="button"
-        onClick={() => onPick("share")}
-        className={cn(
-          "flex flex-col items-center gap-3 rounded-xl border-2 p-5 text-center",
-          "transition-all hover:border-primary hover:bg-primary/5",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        )}
-      >
-        <div className="flex items-center justify-center size-12 rounded-xl bg-primary/10 text-primary">
-          <QrCode className="size-6" />
+    <div className="flex flex-col gap-3 py-2">
+      {/* Illustration row */}
+      <div className="flex items-center justify-center gap-4 py-4">
+        <div className="flex items-center justify-center size-12 rounded-2xl bg-muted">
+          <Monitor className="size-5 text-muted-foreground" />
         </div>
-        <div>
-          <p className="text-sm font-semibold">Share</p>
-          <p className="text-[11px] text-muted-foreground mt-0.5">
-            Show a QR code or link for another device to scan
-          </p>
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex gap-0.5">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="block w-1 h-1 rounded-full bg-primary/60 animate-bounce"
+                style={{ animationDelay: `${i * 100}ms` }}
+              />
+            ))}
+          </div>
+          <RefreshCw className="size-4 text-primary" />
         </div>
-      </button>
+        <div className="flex items-center justify-center size-12 rounded-2xl bg-muted">
+          <Smartphone className="size-5 text-muted-foreground" />
+        </div>
+      </div>
 
-      <button
-        type="button"
-        onClick={() => onPick("join")}
-        className={cn(
-          "flex flex-col items-center gap-3 rounded-xl border-2 p-5 text-center",
-          "transition-all hover:border-primary hover:bg-primary/5",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        )}
-      >
-        <div className="flex items-center justify-center size-12 rounded-xl bg-primary/10 text-primary">
-          <Share2 className="size-6" />
-        </div>
-        <div>
-          <p className="text-sm font-semibold">Join</p>
-          <p className="text-[11px] text-muted-foreground mt-0.5">
-            Paste a link or scan a QR from the other device
-          </p>
-        </div>
-      </button>
+      <p className="text-xs text-muted-foreground text-center -mt-2 mb-1">
+        Sync folders directly between devices, peer-to-peer.
+      </p>
+
+      {/* Mode buttons */}
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={() => onPick("share")}
+          className={cn(
+            "flex flex-col items-center gap-3 rounded-2xl border-2 border-border p-5 text-center",
+            "transition-all duration-200",
+            "hover:border-primary hover:bg-primary/5 active:scale-[0.97]",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+        >
+          <div className="flex items-center justify-center size-12 rounded-xl bg-primary/10 text-primary">
+            <QrCode className="size-5" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold">Share</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+              Generate a QR code for another device to scan
+            </p>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onPick("join")}
+          className={cn(
+            "flex flex-col items-center gap-3 rounded-2xl border-2 border-border p-5 text-center",
+            "transition-all duration-200",
+            "hover:border-primary hover:bg-primary/5 active:scale-[0.97]",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+        >
+          <div className="flex items-center justify-center size-12 rounded-xl bg-primary/10 text-primary">
+            <Link2 className="size-5" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold">Join</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+              Paste a link or code from the other device
+            </p>
+          </div>
+        </button>
+      </div>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Full-screen-on-mobile dialog content wrapper
+// ─────────────────────────────────────────────────────────────────────────────
+
+function FullscreenDialogContent({
+  children,
+  className,
+  ...props
+}: React.ComponentProps<typeof DialogPrimitive.Content>) {
+  return (
+    <DialogPortal>
+      <DialogOverlay />
+      <DialogPrimitive.Content
+        className={cn(
+          // Mobile: full screen
+          "fixed inset-0 z-50 flex flex-col bg-background outline-none",
+          // ≥sm: centred card
+          "sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2",
+          "sm:rounded-2xl sm:border sm:shadow-2xl sm:w-full sm:max-w-md",
+          // animation
+          "data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+          "data-[state=closed]:slide-out-to-bottom sm:data-[state=closed]:slide-out-to-bottom-0",
+          "data-[state=open]:slide-in-from-bottom sm:data-[state=open]:slide-in-from-bottom-0",
+          "sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95",
+          "duration-300",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </DialogPrimitive.Content>
+    </DialogPortal>
   );
 }
 
@@ -614,63 +779,87 @@ export function AddPairDialog({
   device,
   readyPeers,
   sessionId,
+  joinSession,
   onCreatePair,
+  autoJoinPayload,
 }: AddPairDialogProps) {
   const [mode, setMode] = useState<DialogMode>("pick");
-
-  // Snapshot of peers before the dialog opened, used to detect new joiners
   const prevPeersRef = useRef<string[]>([]);
 
-  // Snapshot peers when the dialog opens (used to detect new joiners)
-  // We intentionally do NOT reset mode via useEffect to avoid sync setState —
-  // instead the dialog uses a `key` prop driven by `open` at the call site,
-  // or we reset via the onOpenChange handler below.
-  const handleOpenChange = useCallback(
-    (next: boolean) => {
-      if (next) {
-        // Dialog opening — snapshot current peers and reset to pick mode
-        prevPeersRef.current = [...readyPeers];
-        setMode("pick");
-      }
-      onOpenChange(next);
-    },
+  // When dialog opens: snapshot peers, reset mode (or auto-enter join)
+  useEffect(() => {
+    if (open) {
+      prevPeersRef.current = [...readyPeers];
+      setMode(autoJoinPayload ? "join" : "pick");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onOpenChange],
-  );
+  }, [open]);
 
   const handleDone = useCallback(() => {
     onOpenChange(false);
   }, [onOpenChange]);
 
-  const title =
-    mode === "pick"
-      ? "Add Sync Pair"
-      : mode === "share"
-        ? "Share — Show QR Code"
-        : "Join — Scan or Paste";
-
-  const description =
-    mode === "pick"
-      ? "Sync folders directly between devices, peer-to-peer."
-      : mode === "share"
-        ? "Have the other device scan this QR code or open the link."
-        : "Scan the QR code from the other device or paste the share link.";
+  const titles: Record<DialogMode, string> = {
+    pick: "Add Sync Pair",
+    share: "Scan to Connect",
+    join: "Join Sync Pair",
+  };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <FullscreenDialogContent>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-border/60 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            {mode !== "pick" && (
+              <button
+                type="button"
+                onClick={() => setMode("pick")}
+                className="flex items-center justify-center size-8 rounded-lg hover:bg-muted transition-colors shrink-0"
+                aria-label="Back"
+              >
+                <ArrowLeft className="size-4" />
+              </button>
+            )}
+            <h2 className="text-base font-semibold truncate">{titles[mode]}</h2>
+          </div>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="flex items-center justify-center size-8 rounded-lg hover:bg-muted transition-colors shrink-0"
+            aria-label="Close"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
 
-        <div className="py-1">
-          {mode === "pick" && <ModePicker onPick={(m) => setMode(m)} />}
+        {/* Scrollable content area */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0">
+          {mode === "pick" && (
+            <ModePicker
+              onPick={(m) => {
+                prevPeersRef.current = [...readyPeers];
+                setMode(m);
+              }}
+            />
+          )}
 
           {mode === "share" && (
             <>
               {!device ? (
-                <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+                <div className="flex items-center justify-center py-16 gap-3 text-muted-foreground">
                   <Loader2 className="size-5 animate-spin" />
                   <span className="text-sm">Initialising device…</span>
                 </div>
@@ -688,24 +877,20 @@ export function AddPairDialog({
           )}
 
           {mode === "join" && (
-            <JoinFlow onCreatePair={onCreatePair} onDone={handleDone} />
+            <JoinFlow
+              joinSession={joinSession}
+              readyPeers={readyPeers}
+              prevPeersRef={prevPeersRef}
+              onCreatePair={onCreatePair}
+              onDone={handleDone}
+              autoPayload={autoJoinPayload}
+            />
           )}
         </div>
 
-        {mode !== "pick" && (
-          <DialogFooter className="pt-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setMode("pick")}
-              className="gap-1.5 text-xs"
-            >
-              <X className="size-3.5" />
-              Back
-            </Button>
-          </DialogFooter>
-        )}
-      </DialogContent>
+        {/* Safe area bottom padding on mobile */}
+        <div className="shrink-0 h-[env(safe-area-inset-bottom,0px)] sm:hidden" />
+      </FullscreenDialogContent>
     </Dialog>
   );
 }

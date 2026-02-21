@@ -37,11 +37,17 @@ import { SyncSheet } from "@/components/sync/SyncSheet";
 // BDP — Butterfly Delta Protocol
 import { useBDP } from "@/bdp/hooks/useBDP";
 import { SyncDashboard } from "@/bdp/components/SyncDashboard";
-import { AddPairDialog } from "@/bdp/components/AddPairDialog";
+import {
+  AddPairDialog,
+  decodeQRPayload,
+  extractBDPParam,
+} from "@/bdp/components/AddPairDialog";
 import { VaultBrowser } from "@/bdp/components/VaultBrowser";
 import { ConflictResolver } from "@/bdp/components/ConflictResolver";
 import { SyncProgress } from "@/bdp/components/SyncProgress";
 import type { PairId } from "@/types/bdp";
+
+import type { QRPayload } from "@/bdp/components/AddPairDialog";
 import { cn } from "@/lib/utils";
 
 function AppContent() {
@@ -105,8 +111,25 @@ function AppContent() {
 
   // ── BDP Sync ────────────────────────────────────────────────────────────────
   const bdp = useBDP({ getDataChannelForPeer, readyPeers });
-  const [bdpPanelOpen, setBdpPanelOpen] = useState(false);
-  const [addPairOpen, setAddPairOpen] = useState(false);
+
+  // Lazy-init: read ?bdp= once on first render — avoids setState-in-effect
+  const [autoJoinPayload, setAutoJoinPayload] = useState<QRPayload | null>(
+    () => {
+      const bdpParam = new URLSearchParams(window.location.search).get("bdp");
+      if (!bdpParam) return null;
+      try {
+        return decodeQRPayload(extractBDPParam(bdpParam));
+      } catch {
+        return null;
+      }
+    },
+  );
+  const [bdpPanelOpen, setBdpPanelOpen] = useState(() => {
+    return !!new URLSearchParams(window.location.search).get("bdp");
+  });
+  const [addPairOpen, setAddPairOpen] = useState(() => {
+    return !!new URLSearchParams(window.location.search).get("bdp");
+  });
   /** null = show dashboard, PairId = show vault for that pair */
   const [vaultPairId, setVaultPairId] = useState<PairId | null>(null);
   /**
@@ -123,6 +146,16 @@ function AppContent() {
   useEffect(() => {
     return registerBDPHandler(bdp.handleFrame);
   }, [registerBDPHandler, bdp.handleFrame]);
+
+  // ── Strip ?bdp= from the URL after reading it on mount ───────────────────
+  useEffect(() => {
+    if (!autoJoinPayload) return;
+    const cleanUrl =
+      window.location.pathname +
+      window.location.search.replace(/[?&]bdp=[^&]*/g, "").replace(/^&/, "?") +
+      window.location.hash;
+    window.history.replaceState(null, "", cleanUrl || window.location.pathname);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * Derive the pairId whose conflict resolver should be shown.
@@ -946,10 +979,15 @@ function AppContent() {
       {/* Add Pair Dialog */}
       <AddPairDialog
         open={addPairOpen}
-        onOpenChange={setAddPairOpen}
+        onOpenChange={(next) => {
+          setAddPairOpen(next);
+          if (!next) setAutoJoinPayload(null);
+        }}
         device={bdp.device}
         readyPeers={readyPeers}
         sessionId={session.session?.id ?? ""}
+        joinSession={joinSession}
+        autoJoinPayload={autoJoinPayload}
         onCreatePair={async (opts) => {
           const pair = await bdp.createPair(opts);
           toast.success(`Sync pair "${opts.folderName}" created`, {
