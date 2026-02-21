@@ -291,6 +291,15 @@ export function useBDP({
   // ── Session lifecycle (peer connect / disconnect) ─────────────────────────
 
   useEffect(() => {
+    // Bug #4 fix: if BDP device is still initialising, bail early.
+    // This effect will re-run once `initialising` flips to false (it's in
+    // the deps array below).  Without this guard, the effect ran with
+    // deviceRef.current === null on slow devices (e.g. iPhone first visit
+    // where IndexedDB/OPFS init takes longer than the WebRTC handshake),
+    // returned early, and never retried — so the BDPSession was never
+    // created on the receiver side.
+    if (initialising) return;
+
     const currentDevice = deviceRef.current;
     const currentPairs = pairsRef.current;
 
@@ -315,7 +324,22 @@ export function useBDP({
       }
     }
 
-    if (!currentDevice || currentPairs.length === 0) return;
+    if (!currentDevice) {
+      if (import.meta.env.DEV) {
+        console.warn(
+          `[useBDP] session lifecycle: device not ready yet (initialising=${initialising}), skipping`,
+        );
+      }
+      return;
+    }
+    if (currentPairs.length === 0) {
+      if (import.meta.env.DEV && readyArray.length > 0) {
+        console.warn(
+          `[useBDP] session lifecycle: ${readyArray.length} ready peer(s) but no pairs yet — create a sync pair first`,
+        );
+      }
+      return;
+    }
 
     // ── Start sessions for any peer+pair combo that still needs one ────────
     //
@@ -326,10 +350,13 @@ export function useBDP({
     // Matching strategy:
     //   1. Exact match: a pair whose devices list contains the BDP deviceId
     //      equal to the WebRTC peerId (legacy / future explicit mapping).
-    //   2. Fallback: the first pair that has no active session yet.
+    //   2. Fallback: most-recently-created pair that has no active session.
     //      Both sides share the same pairId (joiner reuses the initiator's
     //      pairId), so BDP_HELLO greeting will confirm the match and fail
     //      gracefully for any mismatched pair.
+    //      Sorting newest-first ensures that if the user has stale/failed
+    //      pairs from prior attempts, the brand-new pair is always tried
+    //      first (Bug #5 fix).
 
     // Build the set of pairIds that already have an active session
     const pairsWithSession = new Set(
@@ -345,24 +372,36 @@ export function useBDP({
         p.devices.some((d) => d.deviceId === (peerId as DeviceId)),
       );
 
-      // 2. Fallback: any pair that has no session yet
+      // 2. Bug #5 fix: fallback — most recently created pair without a session
+      //    (sorted newest-first so stale leftover pairs are skipped)
       if (!matchingPair) {
-        matchingPair = currentPairs.find(
-          (p) => !pairsWithSession.has(p.pairId),
-        );
+        matchingPair = [...currentPairs]
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .find((p) => !pairsWithSession.has(p.pairId));
       }
 
       if (!matchingPair) {
         // All pairs already have sessions — this peer is a plain file-transfer
         // peer (no BDP pair), skip it.
+        if (import.meta.env.DEV) {
+          console.log(
+            `[useBDP] peer ${peerId.slice(0, 8)} has no matching pair without a session — skipping (plain file-transfer peer or all pairs claimed)`,
+          );
+        }
         continue;
+      }
+
+      if (import.meta.env.DEV) {
+        console.log(
+          `[useBDP] matched peer ${peerId.slice(0, 8)} → pair ${matchingPair.pairId.slice(0, 8)} ("${matchingPair.localFolder.name}")`,
+        );
       }
 
       const dc = getDataChannelForPeer(peerId);
       if (!dc || dc.readyState !== "open") {
         if (import.meta.env.DEV) {
           console.warn(
-            `[useBDP] DataChannel not open for peer ${peerId}, skipping session`,
+            `[useBDP] DataChannel not open for peer ${peerId.slice(0, 8)} (state=${dc?.readyState ?? "null"}), skipping session — will retry when DataChannel opens`,
           );
         }
         continue;
@@ -444,28 +483,52 @@ export function useBDP({
       session.on("stopped", () => {
         unsubscribeState();
         unsubscribePeerIdentified();
+
+        // Bug #6 fix: remove the session from sessionsRef when it stops so
+        // that a new session can be attempted for the same peer if the
+        // session failed (e.g. start() threw, DataChannel closed mid-greeting,
+        // or a transient error caused a retry loop to exhaust).
+        // Without this, sessionsRef.current.has(peerId) stays true forever
+        // for an errored session, blocking any recovery while the peer is
+        // still connected.
+        sessionsRef.current.delete(peerId);
+
+        if (import.meta.env.DEV) {
+          console.log(
+            `[useBDP] session removed from sessionsRef on stop for peer ${peerId}`,
+          );
+        }
       });
 
       sessionsRef.current.set(peerId, session);
 
       if (import.meta.env.DEV) {
         console.log(
-          `[useBDP] starting session for peer ${peerId} / pair ${matchingPair.pairId}`,
+          `[useBDP] 🚀 starting BDP session — peer=${peerId.slice(0, 8)} pair=${matchingPair.pairId.slice(0, 8)} dc=${dc.readyState}`,
         );
       }
 
       session.start().catch((err) => {
         if (import.meta.env.DEV) {
-          console.error(`[useBDP] session.start() failed for ${peerId}:`, err);
+          console.error(
+            `[useBDP] ❌ session.start() failed for peer ${peerId.slice(0, 8)}:`,
+            err,
+          );
         }
+        // If start() itself threw (e.g. DataChannel was already closed),
+        // remove the session immediately so the effect can retry on the next
+        // readyPeers / pairs update.
+        sessionsRef.current.delete(peerId);
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readyPeers, pairs, getDataChannelForPeer]);
+  }, [readyPeers, pairs, getDataChannelForPeer, initialising]);
   // `pairs` is in deps so that creating a pair while a peer is already
   // connected immediately triggers a session start.
-  // `pairs` and `device` are also read from refs inside the effect to avoid
-  // stale-closure issues without causing extra re-runs.
+  // `device` is read from a ref to avoid stale closures.
+  // `initialising` is in deps (Bug #4 fix) so that when IDB/OPFS init
+  // completes on slow devices (e.g. iPhone first visit), the effect re-runs
+  // and creates BDPSessions for any peers that connected while device was null.
 
   // ── Internal helpers ──────────────────────────────────────────────────────
 
