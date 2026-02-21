@@ -351,9 +351,12 @@ export class BDPSession {
   };
 
   private _onError = (): void => {
-    if (!this._stopped) {
-      this._setFatalError("TRANSFER_FAILED", "DataChannel error", true);
-    }
+    if (this._stopped) return;
+    // DataChannel 'error' often fires when the peer disconnects or the channel is closing.
+    // If we're already closing/closed, onclose will run and set a clearer state — avoid double error.
+    const state = this._opts.dataChannel.readyState;
+    if (state === "closing" || state === "closed") return;
+    this._setFatalError("TRANSFER_FAILED", "DataChannel error", true);
   };
 
   private _attachDataChannelListeners(): void {

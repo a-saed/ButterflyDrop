@@ -732,20 +732,23 @@ function AppContent() {
                 </div>
               )}
 
-              {[...bdp.engineStates.entries()]
-                .filter(([, s]) =>
-                  [
-                    "greeting",
-                    "diffing",
-                    "delta_sync",
-                    "full_sync",
-                    "transferring",
-                    "finalizing",
-                  ].includes(s.phase),
-                )
-                .map(([pairId, state]) => (
-                  <SyncProgress key={pairId} state={state} />
-                ))}
+              {/* Single container so React never reorders siblings when list length changes (fixes insertBefore NotFoundError) */}
+              <div className="space-y-4" key="sync-progress-list">
+                {[...bdp.engineStates.entries()]
+                  .filter(([, s]) =>
+                    [
+                      "greeting",
+                      "diffing",
+                      "delta_sync",
+                      "full_sync",
+                      "transferring",
+                      "finalizing",
+                    ].includes(s.phase),
+                  )
+                  .map(([pairId, state]) => (
+                    <SyncProgress key={pairId} state={state} />
+                  ))}
+              </div>
 
               {activeConflictPairId &&
                 bdpConflictState?.phase === "resolving_conflict" &&
@@ -775,8 +778,10 @@ function AppContent() {
                   />
                 )}
 
+              {/* Key forces React to unmount/remount when switching (avoids insertBefore DOM reuse bugs) */}
               {vaultPairId && bdpVaultPair ? (
                 <VaultBrowser
+                  key={`vault-${vaultPairId}`}
                   pairId={vaultPairId}
                   files={bdp.vaultFiles.get(vaultPairId) ?? []}
                   folderName={bdpVaultPair.localFolder.name}
@@ -785,6 +790,7 @@ function AppContent() {
                 />
               ) : (
                 <SyncDashboard
+                  key="sync-dashboard"
                   pairs={bdp.pairs}
                   engineStates={bdp.engineStates}
                   onAddPair={() => setAddPairOpen(true)}
