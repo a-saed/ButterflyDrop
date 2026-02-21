@@ -52,7 +52,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogPortal, DialogOverlay } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
-import type { BDPDevice, DeviceId, PairId, SyncPair } from "@/types/bdp";
+import type { BDPDevice, PairId, SyncPair } from "@/types/bdp";
 import type { CreatePairOptions } from "@/bdp/hooks/useBDP";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -507,15 +507,17 @@ function JoinFlow({
     setCreating(true);
     setError(null);
     try {
+      // Pass the sender's pairId so both sides share the same pair identifier.
+      // This is required for BDP_HELLO matching to succeed — each side sends
+      // its pairId in the hello frame and the peer looks it up locally.
+      // We do NOT pass peerInfo here because we don't have the sender's BDP
+      // deviceId at this point (only their WebRTC session ID). The greeting
+      // exchange will identify devices once the session starts.
       await onCreatePair({
+        pairId: decoded.pairId as PairId,
         folderName: result.name,
         handle: result.handle,
         useRealFS: result.useRealFS,
-        peerInfo: {
-          deviceId: decoded.pairId as DeviceId, // refined on BDP_HELLO
-          deviceName: decoded.deviceName,
-          publicKeyB64: decoded.publicKeyB64,
-        },
       });
       setStep("done");
       setTimeout(onDone, 1800);

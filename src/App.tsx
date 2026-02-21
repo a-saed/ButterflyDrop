@@ -479,14 +479,14 @@ function AppContent() {
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <header className="shrink-0 bg-background/85 backdrop-blur-xl border-b border-border/30">
           <div className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2.5">
-            {/* Logo */}
+            {/* Logo — icon only on mobile, full branding on sm+ */}
             <div className="flex items-center gap-2 shrink-0">
               <ButterflyLogo size={28} />
-              <div className="flex flex-col leading-none">
-                <span className="text-xs sm:text-sm font-bold tracking-tight text-foreground">
+              <div className="hidden sm:flex flex-col leading-none">
+                <span className="text-sm font-bold tracking-tight text-foreground">
                   Butterfly Drop
                 </span>
-                <span className="text-[9px] sm:text-[10px] text-muted-foreground font-medium tracking-wide mt-0.5">
+                <span className="text-[10px] text-muted-foreground font-medium tracking-wide mt-0.5">
                   Let your files fly
                 </span>
               </div>

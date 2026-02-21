@@ -75,7 +75,13 @@ export interface CreatePairOptions {
   useRealFS?: boolean;
   direction?: SyncDirection;
   conflictStrategy?: ConflictStrategy;
-  /** The remote peer's device info — added after QR handshake */
+  /**
+   * If provided, reuse this pairId instead of generating a new one.
+   * The joiner (receiver) passes the sender's pairId so both sides share
+   * the same pair identifier — required for BDP_HELLO matching to succeed.
+   */
+  pairId?: PairId;
+  /** The remote peer's device info — added after QR handshake (optional) */
   peerInfo?: {
     deviceId: DeviceId;
     deviceName: string;
@@ -289,9 +295,8 @@ export function useBDP({
     const currentPairs = pairsRef.current;
 
     const readyArray = Array.from(readyPeers);
-    const newPeers = readyArray.filter(
-      (id) => !prevReadyPeersRef.current.includes(id),
-    );
+
+    // ── Track peer arrivals / departures ──────────────────────────────────
     const gonePeers = prevReadyPeersRef.current.filter(
       (id) => !readyArray.includes(id),
     );
@@ -310,37 +315,62 @@ export function useBDP({
       }
     }
 
-    // ── Start sessions for newly connected peers ───────────────────────────
-    if (!currentDevice) return;
+    if (!currentDevice || currentPairs.length === 0) return;
 
-    for (const peerId of newPeers) {
-      // Skip if we already have an active session for this peer
+    // ── Start sessions for any peer+pair combo that still needs one ────────
+    //
+    // We iterate ALL ready peers (not just "new" ones) so that when a pair
+    // is created AFTER the peer has already connected, a session is started
+    // immediately on the next render triggered by the `pairs` state change.
+    //
+    // Matching strategy:
+    //   1. Exact match: a pair whose devices list contains the BDP deviceId
+    //      equal to the WebRTC peerId (legacy / future explicit mapping).
+    //   2. Fallback: the first pair that has no active session yet.
+    //      Both sides share the same pairId (joiner reuses the initiator's
+    //      pairId), so BDP_HELLO greeting will confirm the match and fail
+    //      gracefully for any mismatched pair.
+
+    // Build the set of pairIds that already have an active session
+    const pairsWithSession = new Set(
+      [...sessionsRef.current.values()].map((s) => s.pairId),
+    );
+
+    for (const peerId of readyArray) {
+      // Skip if this peer already has a running session
       if (sessionsRef.current.has(peerId)) continue;
 
-      // Find a matching SyncPair that includes this peer's deviceId
-      // Note: at the WebRTC level, peerId is the WebRTC peer ID (not BDP deviceId).
-      // The pair's devices list uses BDP deviceIds. We match on both as a fallback.
-      const matchingPair = currentPairs.find(
-        (p) =>
-          p.devices.some((d) => d.deviceId === peerId) ||
-          p.devices.some((d) => d.deviceId === (peerId as DeviceId)),
+      // 1. Exact device-id match (future-proof once greeting updates devices[])
+      let matchingPair = currentPairs.find((p) =>
+        p.devices.some((d) => d.deviceId === (peerId as DeviceId)),
       );
 
+      // 2. Fallback: any pair that has no session yet
       if (!matchingPair) {
-        // No pair configured for this peer — skip silently
-        // (the peer may be a plain file-transfer peer, not a BDP pair)
+        matchingPair = currentPairs.find(
+          (p) => !pairsWithSession.has(p.pairId),
+        );
+      }
+
+      if (!matchingPair) {
+        // All pairs already have sessions — this peer is a plain file-transfer
+        // peer (no BDP pair), skip it.
         continue;
       }
 
       const dc = getDataChannelForPeer(peerId);
-      if (!dc) {
+      if (!dc || dc.readyState !== "open") {
         if (import.meta.env.DEV) {
           console.warn(
-            `[useBDP] no DataChannel for peer ${peerId}, skipping session`,
+            `[useBDP] DataChannel not open for peer ${peerId}, skipping session`,
           );
         }
         continue;
       }
+
+      // Mark this pair as "claimed" so the next loop iteration doesn't
+      // double-assign it to another peer in the same render cycle.
+      pairsWithSession.add(matchingPair.pairId);
 
       const peerInfo = matchingPair.devices.find(
         (d) => d.deviceId !== currentDevice.deviceId,
@@ -358,13 +388,13 @@ export function useBDP({
       // Propagate state changes into React state
       const unsubscribeState = session.on("stateChange", (state) => {
         setEngineStates((prev) =>
-          new Map(prev).set(matchingPair.pairId, state),
+          new Map(prev).set(matchingPair!.pairId, state),
         );
 
         // When a sync completes, refresh vault files and conflicts
         if (state.phase === "idle" || state.phase === "finalizing") {
-          void refreshVaultFilesInternal(matchingPair.pairId);
-          void refreshConflictsInternal(matchingPair.pairId);
+          void refreshVaultFilesInternal(matchingPair!.pairId);
+          void refreshConflictsInternal(matchingPair!.pairId);
         }
       });
 
@@ -388,9 +418,11 @@ export function useBDP({
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readyPeers, getDataChannelForPeer]);
-  // Note: pairs and device are intentionally read from refs to avoid re-running
-  // this effect every time a pair is added (which would duplicate sessions).
+  }, [readyPeers, pairs, getDataChannelForPeer]);
+  // `pairs` is in deps so that creating a pair while a peer is already
+  // connected immediately triggers a session start.
+  // `pairs` and `device` are also read from refs inside the effect to avoid
+  // stale-closure issues without causing extra re-runs.
 
   // ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -467,7 +499,8 @@ export function useBDP({
         throw new Error("BDP device not initialised yet — retry in a moment");
       }
 
-      const pairId = nanoid(32) as PairId;
+      // Reuse the provided pairId (joiner uses sender's pairId) or generate a new one
+      const pairId = options.pairId ?? (nanoid(32) as PairId);
 
       const devices: SyncPair["devices"] = [
         {
