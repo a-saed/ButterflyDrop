@@ -13,7 +13,6 @@ services:
       - key: PORT
         value: 8080
       - key: ALLOWED_ORIGINS
-        sync: false
+        value: https://butterfly-drop.vercel.app,http://localhost:5173,http://localhost:3000
     healthCheckPath: /
     autoDeploy: true
-

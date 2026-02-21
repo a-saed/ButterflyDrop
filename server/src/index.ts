@@ -17,9 +17,28 @@ const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
 const NODE_ENV = process.env.NODE_ENV || "development";
 
 // CORS configuration for production
+const PRODUCTION_ORIGINS = [
+  "https://butterfly-drop.vercel.app",
+  "https://butterfly-drop.pages.dev",
+];
+const DEV_ORIGINS = ["http://localhost:5173", "http://localhost:3000"];
+
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(",")
-  : ["http://localhost:5173", "http://localhost:3000"];
+  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+  : NODE_ENV === "production"
+    ? [...PRODUCTION_ORIGINS, ...DEV_ORIGINS]
+    : DEV_ORIGINS;
+
+if (NODE_ENV === "production" && !process.env.ALLOWED_ORIGINS) {
+  console.warn(
+    "[CORS] WARNING: ALLOWED_ORIGINS env var is not set. " +
+      "Falling back to built-in list: " +
+      ALLOWED_ORIGINS.join(", ") +
+      ". Set ALLOWED_ORIGINS in your deployment environment to suppress this warning.",
+  );
+}
+
+console.log(`[CORS] Allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
 
 // Wire allowed origins into the BDP relay so it enforces CORS correctly
 configureRelay({ allowedOrigins: ALLOWED_ORIGINS });
