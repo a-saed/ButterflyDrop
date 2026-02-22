@@ -697,6 +697,10 @@ function ModePicker({ onPick }: { onPick(mode: "share" | "join"): void }) {
       <p className="text-xs text-muted-foreground text-center -mt-2 mb-1">
         Sync folders directly between devices, peer-to-peer.
       </p>
+      <p className="text-[11px] text-muted-foreground/80 text-center mb-3">
+        One device <strong>Share</strong> (show QR) → other device{" "}
+        <strong>Join</strong> (scan that QR).
+      </p>
 
       {/* Mode buttons */}
       <div className="grid grid-cols-2 gap-3">

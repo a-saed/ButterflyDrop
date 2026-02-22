@@ -615,10 +615,10 @@ export class BDPSession {
     );
 
     if (!peerPairInfo) {
-      // Peer doesn't know about this pair — abort
+      // Peer has a different pairId (e.g. both sides chose "Share" instead of Share + Join)
       this._setFatalError(
         "PAIR_NOT_FOUND",
-        `Peer does not have pair ${this._opts.pairId}`,
+        "The other device has a different sync pair. On one device tap Add Pair → Share (show QR). On the other tap Add Pair → Join and scan that QR, then pick a folder.",
         false,
       );
       return;
