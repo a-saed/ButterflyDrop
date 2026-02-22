@@ -357,10 +357,15 @@ function PairCard({
 
         {/* Connecting hint — greeting can take a few seconds */}
         {status.kind === "connecting" && (
-          <p className="text-[11px] text-muted-foreground/70 bg-muted/40 rounded px-2 py-1">
-            Establishing secure connection… Ensure the other device has the app
-            open and is on the Sync tab.
-          </p>
+          <div className="space-y-1.5">
+            <p className="text-[11px] text-muted-foreground/70 bg-muted/40 rounded px-2 py-1">
+              Establishing secure connection…
+            </p>
+            <p className="text-[11px] text-muted-foreground/80 rounded px-2 py-1">
+              On the <strong>other</strong> device: open the <strong>same link</strong> (or scan the QR), tap{" "}
+              <strong>Choose Folder</strong>, pick a folder, then stay on the Sync tab. If that device shows &quot;No pairs configured&quot;, it has not finished — it must complete Add Pair → Join and choose a folder.
+            </p>
+          </div>
         )}
 
         {/* Direction badge */}
@@ -429,9 +434,12 @@ function EmptyState({ onAddPair }: { onAddPair(): void }) {
         <ArrowUpDown className="size-7" />
       </div>
       <h3 className="text-sm font-semibold mb-1">No sync pairs yet</h3>
-      <p className="text-xs text-muted-foreground max-w-55 mb-5 leading-relaxed">
+      <p className="text-xs text-muted-foreground max-w-55 mb-2 leading-relaxed">
         Create a sync pair to share folders directly between your devices —
         peer-to-peer, end-to-end encrypted, no cloud required.
+      </p>
+      <p className="text-[11px] text-muted-foreground/90 max-w-60 mb-5 leading-relaxed">
+        Joining from the other device&apos;s link? Tap Add Sync Pair → <strong>Join</strong>, paste the link (or scan QR), then tap <strong>Choose Folder</strong> and pick a folder. Both devices must complete this to connect.
       </p>
       <Button onClick={onAddPair} size="sm" className="gap-2">
         <Plus className="size-4" />
