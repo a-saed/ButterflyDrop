@@ -722,20 +722,20 @@ function AppContent() {
         {/* ── Tab: SYNC PAIRS ─────────────────────────────────────────────── */}
         {activeTab === "sync" && (
           <main className="flex-1 overflow-y-auto min-h-0">
-            <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 space-y-4">
-              {bdp.initError && (
+            <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6">
+              <div className="space-y-4" key="sync-tab-content">
+                {bdp.initError && (
                 <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-900/10 px-3 py-2.5">
-                  <AlertTriangle className="size-4 text-red-500 shrink-0 mt-0.5" />
-                  <p className="text-xs text-red-600 dark:text-red-400">
-                    {bdp.initError.message}
-                  </p>
-                </div>
-              )}
+                    <AlertTriangle className="size-4 text-red-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      {bdp.initError.message}
+                    </p>
+                  </div>
+                )}
 
-              {/* Single container so React never reorders siblings when list length changes (fixes insertBefore NotFoundError) */}
-              <div className="space-y-4" key="sync-progress-list">
-                {[...bdp.engineStates.entries()]
-                  .filter(([, s]) =>
+                <div className="space-y-4" key="sync-progress-list">
+                  {[...bdp.engineStates.entries()]
+                    .filter(([, s]) =>
                     [
                       "greeting",
                       "diffing",
@@ -745,86 +745,86 @@ function AppContent() {
                       "finalizing",
                     ].includes(s.phase),
                   )
-                  .map(([pairId, state]) => (
-                    <SyncProgress key={pairId} state={state} />
-                  ))}
-              </div>
+                    .map(([pairId, state]) => (
+                      <SyncProgress key={pairId} state={state} />
+                    ))}
+                </div>
 
-              {activeConflictPairId &&
-                bdpConflictState?.phase === "resolving_conflict" &&
-                bdpConflictState.pendingConflicts.length > 0 && (
-                  <ConflictResolver
-                    pairId={activeConflictPairId}
-                    conflicts={bdpConflictState.pendingConflicts}
-                    localDeviceName={bdp.device?.deviceName ?? "This device"}
-                    remoteDeviceName={
-                      bdpConflictState.peerDeviceName ?? "Remote device"
-                    }
-                    onResolve={bdp.resolveConflict}
-                    onAllResolved={() =>
-                      setDismissedConflictPairs((p) => {
-                        const n = new Set(p);
-                        n.add(activeConflictPairId);
-                        return n;
-                      })
-                    }
-                    onDismiss={() =>
-                      setDismissedConflictPairs((p) => {
-                        const n = new Set(p);
-                        n.add(activeConflictPairId);
-                        return n;
-                      })
-                    }
+                {activeConflictPairId &&
+                  bdpConflictState?.phase === "resolving_conflict" &&
+                  bdpConflictState.pendingConflicts.length > 0 && (
+                    <ConflictResolver
+                      pairId={activeConflictPairId}
+                      conflicts={bdpConflictState.pendingConflicts}
+                      localDeviceName={bdp.device?.deviceName ?? "This device"}
+                      remoteDeviceName={
+                        bdpConflictState.peerDeviceName ?? "Remote device"
+                      }
+                      onResolve={bdp.resolveConflict}
+                      onAllResolved={() =>
+                        setDismissedConflictPairs((p) => {
+                          const n = new Set(p);
+                          n.add(activeConflictPairId);
+                          return n;
+                        })
+                      }
+                      onDismiss={() =>
+                        setDismissedConflictPairs((p) => {
+                          const n = new Set(p);
+                          n.add(activeConflictPairId);
+                          return n;
+                        })
+                      }
+                    />
+                  )}
+
+                {vaultPairId && bdpVaultPair ? (
+                  <VaultBrowser
+                    key={`vault-${vaultPairId}`}
+                    pairId={vaultPairId}
+                    files={bdp.vaultFiles.get(vaultPairId) ?? []}
+                    folderName={bdpVaultPair.localFolder.name}
+                    onRefresh={() => bdp.refreshVaultFiles(vaultPairId)}
+                    onClose={() => setVaultPairId(null)}
+                  />
+                ) : (
+                  <SyncDashboard
+                    key="sync-dashboard"
+                    pairs={bdp.pairs}
+                    engineStates={bdp.engineStates}
+                    onAddPair={() => setAddPairOpen(true)}
+                    onViewVault={(id) => setVaultPairId(id)}
+                    onDeletePair={async (id) => {
+                      await bdp.deletePair(id);
+                      toast.success("Sync pair removed");
+                    }}
+                    onSyncNow={(id) => {
+                      bdp.triggerSync(id).catch((e) =>
+                        toast.error("Sync failed", {
+                          description: e instanceof Error ? e.message : String(e),
+                        }),
+                      );
+                    }}
                   />
                 )}
 
-              {/* Key forces React to unmount/remount when switching (avoids insertBefore DOM reuse bugs) */}
-              {vaultPairId && bdpVaultPair ? (
-                <VaultBrowser
-                  key={`vault-${vaultPairId}`}
-                  pairId={vaultPairId}
-                  files={bdp.vaultFiles.get(vaultPairId) ?? []}
-                  folderName={bdpVaultPair.localFolder.name}
-                  onRefresh={() => bdp.refreshVaultFiles(vaultPairId)}
-                  onClose={() => setVaultPairId(null)}
-                />
-              ) : (
-                <SyncDashboard
-                  key="sync-dashboard"
-                  pairs={bdp.pairs}
-                  engineStates={bdp.engineStates}
-                  onAddPair={() => setAddPairOpen(true)}
-                  onViewVault={(id) => setVaultPairId(id)}
-                  onDeletePair={async (id) => {
-                    await bdp.deletePair(id);
-                    toast.success("Sync pair removed");
-                  }}
-                  onSyncNow={(id) => {
-                    bdp.triggerSync(id).catch((e) =>
-                      toast.error("Sync failed", {
-                        description: e instanceof Error ? e.message : String(e),
-                      }),
-                    );
-                  }}
-                />
-              )}
+                {bdp.pairs.length > 0 && !vaultPairId && (
+                  <div className="flex justify-center">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAddPairOpen(true)}
+                      className="gap-2"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add another pair
+                    </Button>
+                  </div>
+                )}
 
-              {bdp.pairs.length > 0 && !vaultPairId && (
-                <div className="flex justify-center">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setAddPairOpen(true)}
-                    className="gap-2"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add another pair
-                  </Button>
-                </div>
-              )}
-
-              {/* BDP Protocol info — collapsible, always at the bottom */}
-              <BDPProtocolInfo />
+                {/* BDP Protocol info — collapsible, always at the bottom */}
+                <BDPProtocolInfo />
+              </div>
             </div>
           </main>
         )}

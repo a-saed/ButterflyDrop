@@ -540,12 +540,16 @@ function JoinFlow({
   }, [decoded, onCreatePair, onDone]);
 
   if (step === "done") {
-    return <SuccessView message="Joined sync pair!" />;
+    return (
+      <div key="join-done">
+        <SuccessView message="Joined sync pair!" />
+      </div>
+    );
   }
 
   if (step === "connecting") {
     return (
-      <div className="flex flex-col items-center gap-6 py-10">
+      <div key="join-connecting" className="flex flex-col items-center gap-6 py-10">
         <StepDots total={autoPayload ? 3 : 4} current={autoPayload ? 0 : 1} />
         <div className="flex flex-col items-center gap-3">
           <div className="relative flex items-center justify-center size-16 rounded-full bg-primary/10">
@@ -566,7 +570,7 @@ function JoinFlow({
 
   if (step === "pick-folder") {
     return (
-      <div className="flex flex-col items-center gap-6 py-6 px-2">
+      <div key="join-pick-folder" className="flex flex-col items-center gap-6 py-6 px-2">
         <StepDots total={autoPayload ? 3 : 4} current={autoPayload ? 1 : 2} />
 
         <div className="flex flex-col items-center gap-3">
@@ -611,7 +615,7 @@ function JoinFlow({
 
   // Paste step
   return (
-    <div className="flex flex-col gap-5">
+    <div key="join-paste" className="flex flex-col gap-5">
       <StepDots total={4} current={0} />
 
       <div className="flex flex-col gap-2">
