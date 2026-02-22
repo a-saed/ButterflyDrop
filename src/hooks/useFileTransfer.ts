@@ -622,10 +622,16 @@ export function useFileTransfer() {
 
       setupChannelsRef.current.add(peerId);
 
-      // Process queued messages
-      queuedMessages.forEach((event) => {
-        handleMessage(peerId, peerName, event);
-      });
+      // Replay queued messages after the current effect batch so BDP session
+      // lifecycle has run (otherwise bdpHandler would drop BDP frames for unknown peer)
+      if (queuedMessages.length > 0) {
+        const replay = () => {
+          queuedMessages.forEach((event) => {
+            handleMessage(peerId, peerName, event);
+          });
+        };
+        setTimeout(replay, 0);
+      }
     },
     [handleMessage],
   );

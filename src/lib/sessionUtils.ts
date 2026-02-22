@@ -17,13 +17,37 @@ export function isValidSessionId(id: string): boolean {
 }
 
 /**
- * Get session ID from URL
+ * Get session ID from URL (hash #session=...)
  */
 export function getSessionIdFromUrl(): string | null {
   const hash = window.location.hash.slice(1);
   const params = new URLSearchParams(hash);
   const sessionId = params.get("session");
   return sessionId || null;
+}
+
+/**
+ * Get session ID from ?bdp= URL param (BDP join link).
+ * When present, the joiner should use this sessionId so they land in the same
+ * signaling room as the sharer instead of creating a random session first.
+ */
+export function getSessionIdFromBdpParam(): string | null {
+  const param = new URLSearchParams(window.location.search).get("bdp");
+  if (!param?.trim()) return null;
+  try {
+    const decoded = JSON.parse(atob(param.trim())) as unknown;
+    if (
+      decoded !== null &&
+      typeof decoded === "object" &&
+      "sessionId" in decoded &&
+      typeof (decoded as { sessionId: unknown }).sessionId === "string"
+    ) {
+      return (decoded as { sessionId: string }).sessionId;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
 }
 
 /**

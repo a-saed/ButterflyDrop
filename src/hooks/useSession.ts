@@ -1,6 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useSession as useSessionContext } from "@/contexts/SessionContext";
-import { getSessionIdFromUrl, createShareableUrl } from "@/lib/sessionUtils";
+import {
+  getSessionIdFromUrl,
+  getSessionIdFromBdpParam,
+  createShareableUrl,
+} from "@/lib/sessionUtils";
 
 /**
  * Hook to manage session lifecycle and URL synchronization
@@ -18,7 +22,11 @@ export function useSession() {
       return;
     }
 
-    const sessionId = getSessionIdFromUrl();
+    // Prefer hash (#session=...), then ?bdp= (BDP join link) so joiner lands in correct room
+    let sessionId = getSessionIdFromUrl();
+    if (!sessionId) {
+      sessionId = getSessionIdFromBdpParam();
+    }
 
     if (sessionId && !sessionContext.session) {
       hasProcessedInitialUrlRef.current = true;
