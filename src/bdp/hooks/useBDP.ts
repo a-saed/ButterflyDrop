@@ -309,6 +309,42 @@ export function useBDP({
     return () => window.removeEventListener("focus", onFocus);
   }, [pairs, initialising]);
 
+  // ── Internal helpers ──────────────────────────────────────────────────────
+
+  const refreshVaultFilesInternal = useCallback(
+    async (pairId: PairId): Promise<void> => {
+      try {
+        const files = await listVaultFiles(pairId);
+        setVaultFiles((prev) => new Map(prev).set(pairId, files));
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn(`[useBDP] vault refresh failed for ${pairId}:`, err);
+        }
+      }
+    },
+    [],
+  );
+
+  const refreshConflictsInternal = useCallback(
+    async (pairId: PairId): Promise<void> => {
+      try {
+        const records = await getPendingConflicts(pairId);
+        const conflicts: BDPConflict[] = records.map((r) => ({
+          path: r.path,
+          local: r.local,
+          remote: r.remote,
+          autoResolution: r.autoResolution,
+        }));
+        setPendingConflicts((prev) => new Map(prev).set(pairId, conflicts));
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn(`[useBDP] conflict refresh failed for ${pairId}:`, err);
+        }
+      }
+    },
+    [],
+  );
+
   // ── Session lifecycle (peer connect / disconnect) ─────────────────────────
 
   useEffect(() => {
@@ -552,42 +588,6 @@ export function useBDP({
   // `initialising` is in deps (Bug #4 fix) so that when IDB/OPFS init
   // completes on slow devices (e.g. iPhone first visit), the effect re-runs
   // and creates BDPSessions for any peers that connected while device was null.
-
-  // ── Internal helpers ──────────────────────────────────────────────────────
-
-  const refreshVaultFilesInternal = useCallback(
-    async (pairId: PairId): Promise<void> => {
-      try {
-        const files = await listVaultFiles(pairId);
-        setVaultFiles((prev) => new Map(prev).set(pairId, files));
-      } catch (err) {
-        if (import.meta.env.DEV) {
-          console.warn(`[useBDP] vault refresh failed for ${pairId}:`, err);
-        }
-      }
-    },
-    [],
-  );
-
-  const refreshConflictsInternal = useCallback(
-    async (pairId: PairId): Promise<void> => {
-      try {
-        const records = await getPendingConflicts(pairId);
-        const conflicts: BDPConflict[] = records.map((r) => ({
-          path: r.path,
-          local: r.local,
-          remote: r.remote,
-          autoResolution: r.autoResolution,
-        }));
-        setPendingConflicts((prev) => new Map(prev).set(pairId, conflicts));
-      } catch (err) {
-        if (import.meta.env.DEV) {
-          console.warn(`[useBDP] conflict refresh failed for ${pairId}:`, err);
-        }
-      }
-    },
-    [],
-  );
 
   // ── Public actions ────────────────────────────────────────────────────────
 

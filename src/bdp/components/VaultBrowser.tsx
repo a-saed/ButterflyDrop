@@ -648,6 +648,7 @@ export function VaultBrowser({
         for (const child of node.children) collectFolders(child);
       };
       collectFolders(tree);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setExpandedPaths(new Set(allFolderPaths));
     }
   }, [searchQuery, tree]);

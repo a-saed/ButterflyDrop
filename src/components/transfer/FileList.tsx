@@ -10,13 +10,14 @@ interface FileItemProps {
   onRemove?: () => void
 }
 
-const getFileIcon = (type: string) => {
-  if (type.startsWith('image/')) return FileImage
-  if (type.startsWith('video/')) return FileVideo
-  if (type.startsWith('audio/')) return FileAudio
-  if (type.includes('zip') || type.includes('rar') || type.includes('tar')) return FileArchive
-  if (type.includes('text') || type.includes('pdf') || type.includes('document')) return FileText
-  return File
+const getFileIcon = (type: string, className: string) => {
+  const props = { className }
+  if (type.startsWith('image/')) return <FileImage {...props} />
+  if (type.startsWith('video/')) return <FileVideo {...props} />
+  if (type.startsWith('audio/')) return <FileAudio {...props} />
+  if (type.includes('zip') || type.includes('rar') || type.includes('tar')) return <FileArchive {...props} />
+  if (type.includes('text') || type.includes('pdf') || type.includes('document')) return <FileText {...props} />
+  return <File {...props} />
 }
 
 const getFileColor = (type: string) => {
@@ -29,7 +30,7 @@ const getFileColor = (type: string) => {
 }
 
 function FileChip({ file, index, onRemove }: FileItemProps) {
-  const Icon = getFileIcon(file.type)
+  const fileIcon = getFileIcon(file.type, 'h-4 w-4 shrink-0')
   const colorClass = getFileColor(file.type)
   const [thumbnail, setThumbnail] = useState<string | null>(null)
 
@@ -66,7 +67,7 @@ function FileChip({ file, index, onRemove }: FileItemProps) {
           <img src={thumbnail} alt="" className="h-full w-full object-cover" />
         </div>
       ) : (
-        <Icon className="h-4 w-4 shrink-0" />
+        {fileIcon}
       )}
 
       {/* File name */}

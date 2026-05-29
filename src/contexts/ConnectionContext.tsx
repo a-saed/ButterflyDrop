@@ -31,6 +31,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useConnection(): ConnectionContextValue {
   const context = useContext(ConnectionContext);
   if (context === undefined) {

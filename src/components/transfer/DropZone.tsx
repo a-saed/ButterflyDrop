@@ -177,7 +177,7 @@ export function DropZone({
         <input
           id="folder-input"
           type="file"
-          {...({ webkitdirectory: "" } as any)}
+          {...({ webkitdirectory: "" } as Record<string, string>)}
           multiple
           className="hidden"
           onChange={handleFolderSelect}

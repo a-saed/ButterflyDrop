@@ -72,7 +72,7 @@ export function ButterflyCanvas({ isActive, variant, targetPosition, onComplete 
       }
     }
 
-    let startTime = Date.now()
+    const startTime = Date.now()
     const duration = variant === 'success' ? 2000 : 2500
 
     const drawButterfly = (butterfly: Butterfly) => {
@@ -264,6 +264,7 @@ export function ButterflyAnimation({ trigger, targetPosition }: ButterflyAnimati
         break
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveButterflies(newButterflies)
 
     // Clean up after animation

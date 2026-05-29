@@ -280,17 +280,17 @@ function ShareFlow({
   const [newPeerName, setNewPeerName] = useState<string | null>(null);
 
   // Stable pairId for this dialog session
-  const pairIdRef = useRef<PairId>(nanoid(32) as PairId);
+  const [pairId] = useState<PairId>(() => nanoid(32) as PairId);
 
   const qrEncoded = useMemo(
     () =>
       encodeQRPayload({
-        pairId: pairIdRef.current,
+        pairId,
         publicKeyB64: device.publicKeyB64,
         sessionId,
         deviceName: device.deviceName,
       }),
-    [device.publicKeyB64, device.deviceName, sessionId],
+    [pairId, device.publicKeyB64, device.deviceName, sessionId],
   );
 
   const shareUrl = useMemo(() => buildShareUrl(qrEncoded), [qrEncoded]);
@@ -318,7 +318,7 @@ function ShareFlow({
         // CRITICAL: must reuse the same pairId that was encoded in the QR code.
         // Without this, the sender gets a different random pairId from the
         // receiver, causing BDP_HELLO to fail immediately ("pair not found").
-        pairId: pairIdRef.current,
+        pairId,
         folderName: result.name,
         handle: result.handle,
         useRealFS: result.useRealFS,
@@ -549,7 +549,10 @@ function JoinFlow({
 
   if (step === "connecting") {
     return (
-      <div key="join-connecting" className="flex flex-col items-center gap-6 py-10">
+      <div
+        key="join-connecting"
+        className="flex flex-col items-center gap-6 py-10"
+      >
         <StepDots total={autoPayload ? 3 : 4} current={autoPayload ? 0 : 1} />
         <div className="flex flex-col items-center gap-3">
           <div className="relative flex items-center justify-center size-16 rounded-full bg-primary/10">
@@ -570,7 +573,10 @@ function JoinFlow({
 
   if (step === "pick-folder") {
     return (
-      <div key="join-pick-folder" className="flex flex-col items-center gap-6 py-6 px-2">
+      <div
+        key="join-pick-folder"
+        className="flex flex-col items-center gap-6 py-6 px-2"
+      >
         <StepDots total={autoPayload ? 3 : 4} current={autoPayload ? 1 : 2} />
 
         <div className="flex flex-col items-center gap-3">
@@ -811,6 +817,7 @@ export function AddPairDialog({
   useEffect(() => {
     if (open) {
       prevPeersRef.current = [...readyPeers];
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMode(autoJoinPayload ? "join" : "pick");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

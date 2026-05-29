@@ -192,7 +192,7 @@ export function applyConflictResolutions(
         plan.download.push(conflict.remote);
         break;
 
-      case "both":
+      case "both": {
         // Keep both - rename one
         const renamedLocal: FileSnapshot = {
           ...conflict.local,
@@ -202,6 +202,7 @@ export function applyConflictResolutions(
         plan.upload.push(renamedLocal);
         plan.download.push(conflict.remote);
         break;
+      }
     }
   }
 
