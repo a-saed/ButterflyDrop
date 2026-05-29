@@ -66,9 +66,7 @@ function FileChip({ file, index, onRemove }: FileItemProps) {
         <div className="h-5 w-5 rounded-full overflow-hidden shrink-0 border border-current/20">
           <img src={thumbnail} alt="" className="h-full w-full object-cover" />
         </div>
-      ) : (
-        {fileIcon}
-      )}
+      ) : fileIcon}
 
       {/* File name */}
       <span className="text-xs font-medium truncate max-w-[120px] sm:max-w-[180px]">
